@@ -255,7 +255,7 @@ func convertFromSafetensors(files map[string]string, baseLayers []*layerGGML, is
 		}
 	}
 
-	t, err := os.CreateTemp(tmpDir, "fp16")
+	t, err := os.CreateTemp(tmpDir, "fp32")
 	if err != nil {
 		return nil, err
 	}
