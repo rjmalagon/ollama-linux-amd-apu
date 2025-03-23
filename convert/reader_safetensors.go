@@ -151,12 +151,14 @@ func (st safetensor) WriteTo(w io.Writer) (int64, error) {
 	case tensorKindF32:
 		return 0, binary.Write(w, binary.LittleEndian, f32s)
 	case tensorKindF16:
-		f16s := make([]uint16, len(f32s))
-		for i := range f32s {
-			f16s[i] = float16.Fromfloat32(f32s[i]).Bits()
-		}
-
-		return 0, binary.Write(w, binary.LittleEndian, f16s)
+                // Original code: Converts F32 to F16 for output
+                // f16s := make([]uint16, len(f32s))
+                // for i := range f32s {
+                //     f16s[i] = float16.Fromfloat32(f32s[i]).Bits()
+                // }
+                // return 0, binary.Write(w, binary.LittleEndian, f16s)
+                // Modified code: Output F32 values directly instead of converting to F16
+                return 0, binary.Write(w, binary.LittleEndian, f32s)
 	default:
 		return 0, fmt.Errorf("unknown storage type: %d", st.Kind())
 	}
