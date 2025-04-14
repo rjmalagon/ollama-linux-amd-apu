@@ -8,6 +8,7 @@ import (
 	"image"
 	"slices"
 
+	"github.com/ollama/ollama/fs"
 	"github.com/ollama/ollama/kvcache"
 	"github.com/ollama/ollama/ml"
 	"github.com/ollama/ollama/ml/nn"
@@ -32,7 +33,7 @@ const (
 	selfAttentionLayer
 )
 
-func New(c ml.Config) (model.Model, error) {
+func New(c fs.Config) (model.Model, error) {
 	// Verify unified config
 	if c.Uint("vision.block_count") == 0 {
 		return nil, fmt.Errorf("non-unified vision model not supported")
@@ -135,32 +136,27 @@ func (m *Model) PostTokenize(inputs []input.Input) ([]input.Input, error) {
 	return inputs, nil
 }
 
-func (m *Model) Forward(ctx ml.Context, opts input.Options) (ml.Tensor, error) {
+func (m *Model) Forward(ctx ml.Context, batch input.Batch) (ml.Tensor, error) {
 	var crossAttentionStates ml.Tensor
-	if len(opts.Multimodal) > 0 {
-		images := opts.Multimodal[len(opts.Multimodal)-1].Multimodal.([]ml.Tensor)
+	if len(batch.Multimodal) > 0 {
+		images := batch.Multimodal[len(batch.Multimodal)-1].Multimodal.([]ml.Tensor)
 		if len(images) > 0 {
 			crossAttentionStates = images[len(images)-1]
 		}
 	}
 
-	inputs, err := ctx.Input().FromIntSlice(opts.Inputs, len(opts.Inputs))
+	positions, err := ctx.Input().FromIntSlice(batch.Positions, len(batch.Positions))
 	if err != nil {
 		return nil, err
 	}
 
-	positions, err := ctx.Input().FromIntSlice(opts.Positions, len(opts.Positions))
-	if err != nil {
-		return nil, err
-	}
-
-	outputs, err := ctx.Output().FromIntSlice(opts.Outputs, len(opts.Outputs))
+	outputs, err := ctx.Input().FromIntSlice(batch.Outputs, len(batch.Outputs))
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO: attention mask, cross attention mask
-	return m.TextModel.Forward(ctx, inputs, positions, outputs, nil, crossAttentionStates, nil, m.Cache.(*kvcache.WrapperCache)), nil
+	return m.TextModel.Forward(ctx, batch.Inputs, positions, outputs, nil, crossAttentionStates, nil, m.Cache.(*kvcache.WrapperCache)), nil
 }
 
 func init() {

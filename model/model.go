@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	_ "image/jpeg"
@@ -15,7 +16,8 @@ import (
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
 
-	fs "github.com/ollama/ollama/fs/ggml"
+	"github.com/ollama/ollama/fs"
+	fsggml "github.com/ollama/ollama/fs/ggml"
 	"github.com/ollama/ollama/kvcache"
 	"github.com/ollama/ollama/ml"
 	_ "github.com/ollama/ollama/ml/backend"
@@ -26,7 +28,7 @@ var ErrNoVisionModel = errors.New("this model is missing data required for image
 
 // Model implements a specific model architecture, defining the forward pass and any model-specific configuration
 type Model interface {
-	Forward(ml.Context, input.Options) (ml.Tensor, error)
+	Forward(ml.Context, input.Batch) (ml.Tensor, error)
 
 	Backend() ml.Backend
 	Config() config
@@ -82,10 +84,10 @@ func (m *Base) Config() config {
 	return m.config
 }
 
-var models = make(map[string]func(ml.Config) (Model, error))
+var models = make(map[string]func(fs.Config) (Model, error))
 
 // Register registers a model constructor for the given architecture
-func Register(name string, f func(ml.Config) (Model, error)) {
+func Register(name string, f func(fs.Config) (Model, error)) {
 	if _, ok := models[name]; ok {
 		panic("model: model already registered")
 	}
@@ -94,14 +96,14 @@ func Register(name string, f func(ml.Config) (Model, error)) {
 }
 
 // New initializes a new model instance with the provided configuration based on the metadata in the model file
-func New(modelPath string, params ml.BackendParams) (Model, error) {
+func New(ctx context.Context, modelPath string, params ml.BackendParams) (Model, error) {
 	r, err := os.Open(modelPath)
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
 
-	b, err := ml.NewBackend(r, params)
+	b, err := ml.NewBackend(ctx, r, params)
 	if err != nil {
 		return nil, err
 	}
@@ -130,14 +132,14 @@ func NewTextProcessor(s string) (TextProcessor, error) {
 		return nil, err
 	}
 	defer r.Close()
-	meta, _, err := fs.Decode(r, -1)
+	meta, _, err := fsggml.Decode(r, -1)
 	if err != nil {
 		return nil, err
 	}
 	return getTextProcessor(meta.KV())
 }
 
-func getTextProcessor(kv fs.KV) (TextProcessor, error) {
+func getTextProcessor(kv fsggml.KV) (TextProcessor, error) {
 	arch := kv.Architecture()
 	f, ok := models[arch]
 	if !ok {
@@ -280,24 +282,30 @@ func canNil(t reflect.Type) bool {
 		t.Kind() == reflect.Slice
 }
 
-func Forward(ctx ml.Context, m Model, opts input.Options) (ml.Tensor, error) {
-	if len(opts.Positions) != len(opts.Sequences) {
-		return nil, fmt.Errorf("length of positions (%v) must match length of seqs (%v)", len(opts.Positions), len(opts.Sequences))
+func Forward(ctx ml.Context, m Model, inputs []int32, batch input.Batch) (ml.Tensor, error) {
+	if len(batch.Positions) != len(batch.Sequences) {
+		return nil, fmt.Errorf("length of positions (%v) must match length of seqs (%v)", len(batch.Positions), len(batch.Sequences))
 	}
 
-	if len(opts.Positions) < 1 {
+	if len(batch.Positions) < 1 {
 		return nil, errors.New("batch size cannot be less than 1")
+	}
+
+	var err error
+	batch.Inputs, err = ctx.Input().FromIntSlice(inputs, len(inputs))
+	if err != nil {
+		return nil, err
 	}
 
 	cache := m.Config().Cache
 	if cache != nil {
-		err := cache.StartForward(ctx, opts)
+		err := cache.StartForward(ctx, batch, false)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	t, err := m.Forward(ctx, opts)
+	t, err := m.Forward(ctx, batch)
 	if err != nil {
 		return nil, err
 	}

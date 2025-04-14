@@ -558,6 +558,10 @@ Final response:
 {
   "model": "llama3.2",
   "created_at": "2023-08-04T19:22:45.499127Z",
+  "message": {
+    "role": "assistant",
+    "content": ""
+  },
   "done": true,
   "total_duration": 4883583458,
   "load_duration": 1334875,
@@ -1213,7 +1217,7 @@ Show information about a model including details, modelfile, template, parameter
 
 ```shell
 curl http://localhost:11434/api/show -d '{
-  "model": "llama3.2"
+  "model": "llava"
 }'
 ```
 
@@ -1256,7 +1260,11 @@ curl http://localhost:11434/api/show -d '{
     "tokenizer.ggml.pre": "llama-bpe",
     "tokenizer.ggml.token_type": [],        // populates if `verbose=true`
     "tokenizer.ggml.tokens": []             // populates if `verbose=true`
-  }
+  },
+  "capabilities": [
+    "completion",
+    "vision"
+  ],
 }
 ```
 

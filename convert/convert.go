@@ -182,8 +182,10 @@ func ConvertModel(fsys fs.FS, ws io.WriteSeeker) error {
 
 	var conv ModelConverter
 	switch p.Architectures[0] {
-	case "LlamaForCausalLM", "MistralForCausalLM":
+	case "LlamaForCausalLM":
 		conv = &llamaModel{}
+	case "Mistral3ForConditionalGeneration":
+		conv = &mistral3Model{}
 	case "MixtralForCausalLM":
 		conv = &mixtralModel{}
 	case "GemmaForCausalLM":
@@ -201,7 +203,7 @@ func ConvertModel(fsys fs.FS, ws io.WriteSeeker) error {
 	case "CohereForCausalLM":
 		conv = &commandrModel{}
 	default:
-		return errors.New("unsupported architecture")
+		return fmt.Errorf("unsupported architecture %q", p.Architectures[0])
 	}
 
 	if err := json.Unmarshal(bts, conv); err != nil {
