@@ -282,6 +282,7 @@ type Runner struct {
 	MainGPU   int   `json:"main_gpu,omitempty"`
 	UseMMap   *bool `json:"use_mmap,omitempty"`
 	NumThread int   `json:"num_thread,omitempty"`
+        Reranking bool `json:"reranking,omitempty"`
 }
 
 // EmbedRequest is the request passed to [Client.Embed].
@@ -331,6 +332,23 @@ type EmbeddingRequest struct {
 // EmbeddingResponse is the response from [Client.Embeddings].
 type EmbeddingResponse struct {
 	Embedding []float64 `json:"embedding"`
+}
+
+type RerankRequest struct {
+	Model     string                 `json:"model"`
+	Query     string                 `json:"query"`
+	TopN      int                    `json:"top_n"`     // return top N documents
+	Documents []string               `json:"documents"` // list of documents to rerank
+	KeepAlive *Duration              `json:"keep_alive,omitempty"`
+	Options   map[string]interface{} `json:"options,omitempty"`
+}
+
+type RerankResponse struct {
+	Model   string `json:"model"`
+	Results []struct {
+		Document       string  `json:"document"`
+		RelevanceScore float32 `json:"relevance_score"`
+	} `json:"results"`
 }
 
 // CreateRequest is the request passed to [Client.Create].

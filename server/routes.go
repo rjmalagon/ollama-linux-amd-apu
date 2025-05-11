@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+        "sort"
 	"strings"
 	"syscall"
 	"time"
@@ -374,6 +375,80 @@ func (s *Server) GenerateHandler(c *gin.Context) {
 	}
 
 	streamResponse(c, ch)
+}
+
+func (s *Server) RerankHandler(c *gin.Context) {
+	var req api.RerankRequest
+	if err := c.ShouldBindJSON(&req); errors.Is(err, io.EOF) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing request body"})
+		return
+	} else if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	switch {
+	case len(req.Documents) == 0:
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Documents cannot be empty"})
+		return
+	case req.Query == "":
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Query cannot be empty"})
+		return
+	case req.TopN < 0:
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "TopN cannot be negative"})
+		return
+	}
+
+	if req.Options == nil {
+		req.Options = make(map[string]any)
+	}
+	req.Options["reranking"] = true
+	r, _, _, err := s.scheduleRunner(c.Request.Context(), req.Model, []Capability{}, req.Options, req.KeepAlive)
+	if err != nil {
+		handleScheduleError(c, req.Model, err)
+		return
+	}
+
+	llmreq := llm.RerankRequest{
+		Model:     req.Model,
+		Query:     req.Query,
+		TopN:      req.TopN,
+		Documents: req.Documents,
+	}
+	err = r.Rerank(c.Request.Context(), llmreq, func(rr llm.RerankResponse) {
+		sort.SliceStable(rr.Results, func(i, j int) bool {
+			return rr.Results[i].RelevanceScore > rr.Results[j].RelevanceScore
+		})
+
+		var topn int
+		if req.TopN == 0 {
+			topn = len(rr.Results) // if TopN is unset, return all results
+		} else {
+			topn = min(len(rr.Results), req.TopN)
+		}
+		topResults := rr.Results[:topn]
+
+		rsp := api.RerankResponse{
+			Model: req.Model,
+			Results: make([]struct {
+				Document       string  `json:"document"`
+				RelevanceScore float32 `json:"relevance_score"`
+			}, topn),
+		}
+
+		for i, result := range topResults {
+			rsp.Results[i].Document = req.Documents[result.Index]
+			rsp.Results[i].RelevanceScore = result.RelevanceScore
+		}
+
+		c.JSON(http.StatusOK, rsp)
+	})
+
+	if err != nil {
+		slog.Info(fmt.Sprintf("rerank failed: %v", err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to rerank"})
+		return
+	}
 }
 
 func (s *Server) EmbedHandler(c *gin.Context) {
@@ -1195,6 +1270,7 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	r.POST("/api/blobs/:digest", s.CreateBlobHandler)
 	r.HEAD("/api/blobs/:digest", s.HeadBlobHandler)
 	r.POST("/api/copy", s.CopyHandler)
+        r.POST("/api/rerank", s.RerankHandler)
 
 	// Inference
 	r.GET("/api/ps", s.PsHandler)
