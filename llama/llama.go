@@ -198,15 +198,15 @@ func (c *Context) GetEmbeddingsIth(i int) []float32 {
 	return embeddings
 }
 
-func (c *Context) GetTokenBOS() C.llama_vocab {
+func (c *Context) GetTokenBOS() C.llama_token {
 	return C.llama_vocab_bos(c.Model().c)
 }
 
-func (c *Context) GetTokenEOS() C.llama_vocab {
+func (c *Context) GetTokenEOS() C.llama_token {
 	return C.llama_vocab_eos(c.Model().c)
 }
 
-func (c *Context) GetTokenSEP() C.llama_vocab {
+func (c *Context) GetTokenSEP() C.llama_token {
 	return C.llama_vocab_sep(c.Model().c)
 }
 
