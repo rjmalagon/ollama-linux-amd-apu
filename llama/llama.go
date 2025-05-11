@@ -199,15 +199,15 @@ func (c *Context) GetEmbeddingsIth(i int) []float32 {
 }
 
 func (c *Context) GetTokenBOS() C.llama_token {
-	return C.llama_token_bos(c.Model().c)
+	return C.llama_vocab_bos(c.Model().c)
 }
 
 func (c *Context) GetTokenEOS() C.llama_token {
-	return C.llama_token_eos(c.Model().c)
+	return C.llama_vocab_eos(c.Model().c)
 }
 
 func (c *Context) GetTokenSEP() C.llama_token {
-	return C.llama_token_sep(c.Model().c)
+	return C.llama_vocab_sep(c.Model().c)
 }
 
 type ModelParams struct {
