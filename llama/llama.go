@@ -293,7 +293,7 @@ func (m *Model) AddBOSToken() bool {
 }
 
 func (m *Model) AddEOSToken() bool {
-	return bool(C.llama_add_eos_token(m.c))
+	return bool(C.llama_vocab_get_add_eos(m.c))
 }
 
 func (m *Model) ApplyLoraFromFile(context *Context, loraPath string, scale float32, threads int) error {
