@@ -198,16 +198,22 @@ func (c *Context) GetEmbeddingsIth(i int) []float32 {
 	return embeddings
 }
 
+
 func (c *Context) GetTokenBOS() C.llama_token {
-	return C.llama_vocab_bos(c.Model().c)
+    // Get the vocabulary from the model
+    vocab := C.llama_model_get_vocab(c.Model().c)
+    // Use the vocabulary to get the BOS token
+    return C.llama_vocab_bos(vocab)
 }
 
 func (c *Context) GetTokenEOS() C.llama_token {
-	return C.llama_vocab_eos(c.Model().c)
+    vocab := C.llama_model_get_vocab(c.Model().c)
+    return C.llama_vocab_eos(vocab)
 }
 
 func (c *Context) GetTokenSEP() C.llama_token {
-	return C.llama_vocab_sep(c.Model().c)
+    vocab := C.llama_model_get_vocab(c.Model().c)
+    return C.llama_vocab_sep(vvocab)
 }
 
 type ModelParams struct {
