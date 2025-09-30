@@ -551,6 +551,9 @@ static ggml_backend_reg_t ggml_backend_load_best(const char * name, bool silent,
     fs::path best_path;
 
     for (const auto & search_path : search_paths) {
+#ifndef NDEBUG
+        GGML_LOG_DEBUG("searching files in %s that match search criteria: prefix: %s, extension: %s\n", path_str(search_path).c_str(), file_prefix.c_str(), file_extension.c_str());
+#endif
         if (!fs::exists(search_path)) {
             GGML_LOG_DEBUG("%s: search path %s does not exist\n", __func__, path_str(search_path).c_str());
             continue;
@@ -593,12 +596,18 @@ static ggml_backend_reg_t ggml_backend_load_best(const char * name, bool silent,
             fs::path filename = backend_filename_prefix().native() + name_path.native() + backend_filename_extension().native();
             fs::path path = search_path / filename;
             if (fs::exists(path)) {
+#ifndef NDEBUG
+                GGML_LOG_DEBUG("attempting to load base backend: %s\n", path.native().c_str());
+#endif
                 return get_reg().load_backend(path, silent);
             }
         }
         return nullptr;
     }
 
+#ifndef NDEBUG
+    GGML_LOG_DEBUG("attempting to load: %s\n", best_path.native().c_str());
+#endif
     return get_reg().load_backend(best_path, silent);
 }
 

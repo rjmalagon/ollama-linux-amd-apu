@@ -638,7 +638,10 @@ func (s *llamaServer) Load(ctx context.Context, systemInfo ml.SystemInfo, system
 		s.loadRequest.UseMmap = false
 	}
 
+    slog.Debug("waiting for runner...")
+
 	if err := s.waitUntilRunnerLaunched(ctx); err != nil {
+        slog.Debug("waiting for runner failed", "err", err)
 		return nil, err
 	}
 
