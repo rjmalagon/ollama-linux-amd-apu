@@ -1,3 +1,70 @@
+# Notes:
+This branch is a "not really a fork", some Dockerfile optimizations for AMD APUS.
+Tested on AMD Ryzen 7000 series APU. Needs >=6.10 Linux kernel.
+Intended for use in container environments such as Podman and Docker, but can be used to custom builds.
+
+## Almost/maybe supported APUs
+| **LLVM Target** | **APU GPU** | Supported ROCM Version |
+|-----------------|---------------------|------------------------|
+| gfx1010 | AMD Ryzen 5000 Series with RDNA1 Graphics | ROCM-6.4.4 |
+| gfx1030 | AMD Ryzen 6000 Series with RDNA2 Graphics | ROCM-6.4.4 |
+| gfx1030 | AMD Ryzen 7000 Series with RDNA2 Graphics | ROCM-6.4.4 |
+| gfx1100 | RDNA3 based APUs | ROCM-6.4.4 |
+| gfx1150 | RDNA3.5 based APUs | ROCM-6.4.4 |
+| gfx1200 | RDNA4 based APUs | ROCM-6.4.4 |
+
+"gfx900" from AMD Ryzen 5000 Series with RDNA1 Graphics and earlier are not supported.
+
+## How to build on Docker:
+Just like:
+```shell
+docker build --build-arg FLAVOR=rocm .
+```
+Requires buildkit enabled docker.
+
+## How to build on Podman:
+Buildah on podman just doesn't cut it, you can use "daemon-less" buildkit for this:
+```shell
+podman run -it --rm --privileged -v ./:/tmp/work:z --entrypoint buildctl-daemonless.sh moby/buildkit:master build --frontend dockerfile.v0 --local context=/tmp/work --local dockerfile=/tmp/work --opt build-arg:FLAVOR=rocm --output type=oci,dest=/tmp/work/ollama-rocm.tar
+```
+And load this container image with podman.
+
+## How to build directly from repo.
+Just follow the official Ollama docs.
+
+## How to run this build on Docker and Podman.
+Follow the official Ollama instructions for ROCM builds, you will need to expose the correct devices ` --device /dev/kfd --device /dev/dri `, additionally you will need an env variable for every APU arch, for example `-e HSA_OVERRIDE_GFX_VERSION="10.3.0"` for Ryzen 7000 series APU
+The override will need adjustments for other AMD APUs.
+
+## Container image
+You can test my container image on ghcr.io/rjmalagon/ollama-linux-amd-apu:optm-latest .
+Example on how to run this image on Podman with an Ryzen 7000 Series APU, with flash attention and quantized KV cache, listen on localhost.
+
+```shell
+podman run --name ollama  -v /local/data/path/:/root/.ollama:Z -e OLLAMA_FLASH_ATTENTION=true -e HSA_OVERRIDE_GFX_VERSION="10.3.0" -e OLLAMA_KV_CACHE_TYPE="q8_0" --device /dev/kfd --device /dev/dri -e OLLAMA_DEBUG=0 -p 127.0.0.1:11434:11434 ghcr.io/rjmalagon/ollama-linux-amd-apu:optm-latest serve
+```
+### Check amount of GTT memory
+ You can check the amount of shared memory (GTT memory) by using this command
+ ```shell
+ $ sudo dmesg | grep "amdgpu.*memory"
+ [    3.861444] [drm] amdgpu: 512M of VRAM memory ready
+ [    3.861448] [drm] amdgpu: 12288M of GTT memory ready.
+ ```
+
+The default value is half of system memory.
+### Modify the amount of GTT memory
+
+ If you want to modify the amount of GTT memory. You can edit the `/etc/modprobe.d/ttm.conf` file and add the following content:
+
+ ```
+ # nb of pages 4k, for 48Go
+ options ttm pages_limit=12582912
+ options ttm page_pool_size=12582912
+ ```
+
+ ## Mentions
+ Kudos to @phueper for the Dockerfile expanded ROCM dependencies and to @winstonma for the valuable GTT memory adjustment info.
+
 <div align="center">
   <a href="https://ollama.com">
     <img alt="ollama" width="240" src="https://github.com/ollama/ollama/assets/3325447/0d0b44e2-8f4a-4e99-9b52-a5c1c741c8f7">
@@ -406,7 +473,7 @@ See the [API documentation](./docs/api.md) for all endpoints.
 - [AppFlowy](https://github.com/AppFlowy-IO/AppFlowy) (AI collaborative workspace with Ollama, cross-platform and self-hostable)
 - [Lumina](https://github.com/cushydigit/lumina.git) (A lightweight, minimal React.js frontend for interacting with Ollama servers)
 - [Tiny Notepad](https://pypi.org/project/tiny-notepad) (A lightweight, notepad-like interface to chat with ollama available on PyPI)
-- [macLlama (macOS native)](https://github.com/hellotunamayo/macLlama) (A native macOS GUI application for interacting with Ollama models, featuring a chat interface.) 
+- [macLlama (macOS native)](https://github.com/hellotunamayo/macLlama) (A native macOS GUI application for interacting with Ollama models, featuring a chat interface.)
 - [GPTranslate](https://github.com/philberndt/GPTranslate) (A fast and lightweight, AI powered desktop translation application written with Rust and Tauri. Features real-time translation with OpenAI/Azure/Ollama.)
 - [ollama launcher](https://github.com/NGC13009/ollama-launcher) (A launcher for Ollama, aiming to provide users with convenient functions such as ollama server launching, management, or configuration.)
 - [ai-hub](https://github.com/Aj-Seven/ai-hub) (AI Hub supports multiple models via API keys and Chat support via Ollama API.)
