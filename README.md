@@ -13,7 +13,7 @@ Intended for use in container environments such as Podman and Docker, but can be
 | gfx1150 | RDNA3.5 based APUs | ROCM-6.4.4 |
 | gfx1200 | RDNA4 based APUs | ROCM-6.4.4 |
 
-"gfx900" from AMD Ryzen 5000 Series with RDNA1 Graphics and earlier are not supported.
+"gfx900" from AMD Ryzen 5000 Series with Vega Graphics and earlier are not supported.
 
 ## How to build on Docker:
 Just like:
