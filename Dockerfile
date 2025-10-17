@@ -153,6 +153,7 @@ COPY --from=jetpack-6 dist/lib/ollama/ /lib/ollama/
 
 FROM scratch AS rocm
 COPY --from=rocm-6 dist/lib/ollama /lib/ollama
+COPY --from=vulkan  dist/lib/ollama  /lib/ollama
 
 FROM ${FLAVOR} AS archive
 ARG VULKANVERSION
