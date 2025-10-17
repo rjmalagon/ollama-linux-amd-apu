@@ -3,7 +3,7 @@ This branch is a "not really a fork", some Dockerfile optimizations for AMD APUS
 Tested on AMD Ryzen 7000 series APU. Needs >=6.10 Linux kernel.
 Intended for use in container environments such as Podman and Docker, but can be used to custom builds.
 
-For Vega AMD APUs (AMD Ryzen 2000, 4000 and 5000 Series with Vega Graphics), there is this container image that supports pre Ollama v0.12.4 GTT memory enablemente patches `ghcr.io/rjmalagon/ollama-linux-amd-apu:gfx900-v0.12.2` from code preserved on branch `legacy-gfx900`.
+For Vega AMD APUs (AMD Ryzen 2000, 4000 and 5000 Series with Vega Graphics), may run with the recently added Vulkan backend (Ollama v0.12.6), an there is this container image that supports pre Ollama v0.12.4 GTT memory enablemente patches `ghcr.io/rjmalagon/ollama-linux-amd-apu:gfx900-v0.12.2` from code preserved on branch `legacy-gfx900`.
 
 ## Almost/maybe supported APUs
 | **LLVM Target** | **APU GPU** |
@@ -15,7 +15,7 @@ For Vega AMD APUs (AMD Ryzen 2000, 4000 and 5000 Series with Vega Graphics), the
 | gfx1151 | RDNA3.5 based APUs |
 | gfx1200 | RDNA4 based APUs |
 
-"gfx900" from AMD Ryzen 5000 Series with Vega Graphics and earlier are not supported.
+"gfx900" from AMD Ryzen 5000 Series with Vega Graphics and earlier are not supported on ROCM, may work on Vulkan backend.
 
 ## How to build on Docker:
 Just like:
