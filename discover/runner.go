@@ -415,7 +415,10 @@ func (r *bootstrapRunner) HasExited() bool {
 func bootstrapDevices(ctx context.Context, ollamaLibDirs []string, extraEnvs map[string]string) []ml.DeviceInfo {
 	var out io.Writer
 	if envconfig.LogLevel() == logutil.LevelTrace {
+		slog.Debug("setting bootstrap runner output to os.StdErr")
 		out = os.Stderr
+	} else {
+		slog.Debug("discarding bootstrap runner output.", "LogLevel", envconfig.LogLevel(), "LevelTrace", logutil.LevelTrace)
 	}
 	start := time.Now()
 	defer func() {
