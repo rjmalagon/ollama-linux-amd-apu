@@ -92,6 +92,7 @@ RUN --mount=type=cache,target=/root/.ccache \
         && cmake --build --parallel ${PARALLEL} --preset 'ROCm 6' \
         && cmake --install build --component HIP --strip --parallel ${PARALLEL}
 RUN rm -f dist/lib/ollama/rocm/rocblas/library/*gfx90[06]*
+RUN find dist/lib/ollama
 
 FROM --platform=linux/arm64 nvcr.io/nvidia/l4t-jetpack:${JETPACK5VERSION} AS jetpack-5
 ARG CMAKEVERSION
@@ -162,7 +163,7 @@ COPY --from=build /bin/ollama /bin/ollama
 
 FROM ubuntu:25.10 AS default
 RUN apt-get update \
-    && apt-get install -y ca-certificates rocminfo libroctx64-4 libvulkan1 \
+    && apt-get install -y ca-certificates rocminfo libvulkan1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=archive /bin /usr/bin
