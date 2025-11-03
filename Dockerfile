@@ -3,7 +3,7 @@
 ARG FLAVOR=${TARGETARCH}
 ARG PARALLEL=8
 
-ARG ROCMVERSION=6.4.4
+ARG ROCMVERSION=7.1
 ARG JETPACK5VERSION=r35.4.1
 ARG JETPACK6VERSION=r36.4.0
 ARG CMAKEVERSION=3.31.2
@@ -22,7 +22,7 @@ ARG VULKANVERSION
 RUN wget https://sdk.lunarg.com/sdk/download/${VULKANVERSION}/linux/vulkansdk-linux-x86_64-${VULKANVERSION}.tar.xz -O /tmp/vulkansdk-linux-x86_64-${VULKANVERSION}.tar.xz \
     && tar xvf /tmp/vulkansdk-linux-x86_64-${VULKANVERSION}.tar.xz \
     && dnf -y install ninja-build \
-    && ln -s /usr/bin/python3 /usr/bin/python \  
+    && ln -s /usr/bin/python3 /usr/bin/python \
     && /${VULKANVERSION}/vulkansdk -j 8 vulkan-headers \
     && /${VULKANVERSION}/vulkansdk -j 8 shaderc
 RUN cp -r /${VULKANVERSION}/x86_64/include/* /usr/local/include/ \
@@ -84,14 +84,15 @@ RUN --mount=type=cache,target=/root/.ccache \
         && cmake --install build --component CUDA --strip --parallel ${PARALLEL}
 
 
-FROM base AS rocm-6
+FROM base AS rocm-7
 ENV PATH=/opt/rocm/hcc/bin:/opt/rocm/hip/bin:/opt/rocm/bin:/opt/rocm/hcc/bin:$PATH
 ARG PARALLEL
 RUN --mount=type=cache,target=/root/.ccache \
-    cmake --preset 'ROCm 6' -DOLLAMA_RUNNER_DIR="rocm" \
-        && cmake --build --parallel ${PARALLEL} --preset 'ROCm 6' \
+    cmake --preset 'ROCm 7' -DOLLAMA_RUNNER_DIR="rocm" \
+        && cmake --build --parallel ${PARALLEL} --preset 'ROCm 7' \
         && cmake --install build --component HIP --strip --parallel ${PARALLEL}
 RUN rm -f dist/lib/ollama/rocm/rocblas/library/*gfx90[06]*
+RUN find dist/lib/ollama
 
 FROM --platform=linux/arm64 nvcr.io/nvidia/l4t-jetpack:${JETPACK5VERSION} AS jetpack-5
 ARG CMAKEVERSION
@@ -121,7 +122,7 @@ FROM base AS vulkan
 RUN --mount=type=cache,target=/root/.ccache \
     cmake --preset 'Vulkan' -DOLLAMA_RUNNER_DIR="vulkan" \
         && cmake --build --parallel --preset 'Vulkan' \
-        && cmake --install build --component Vulkan --strip --parallel 8 
+        && cmake --install build --component Vulkan --strip --parallel 8
 
 
 FROM base AS build
@@ -152,7 +153,7 @@ COPY --from=jetpack-5 dist/lib/ollama/ /lib/ollama/
 COPY --from=jetpack-6 dist/lib/ollama/ /lib/ollama/
 
 FROM scratch AS rocm
-COPY --from=rocm-6 dist/lib/ollama /lib/ollama
+COPY --from=rocm-7 dist/lib/ollama /lib/ollama
 COPY --from=vulkan  dist/lib/ollama  /lib/ollama
 
 FROM ${FLAVOR} AS archive
@@ -162,7 +163,7 @@ COPY --from=build /bin/ollama /bin/ollama
 
 FROM ubuntu:25.10 AS default
 RUN apt-get update \
-    && apt-get install -y ca-certificates rocminfo libroctx64-4 libvulkan1 \
+    && apt-get install -y ca-certificates rocminfo libvulkan1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=archive /bin /usr/bin
