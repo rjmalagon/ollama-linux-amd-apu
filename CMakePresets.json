@@ -76,7 +76,7 @@
       "inherits": ["ROCm"],
       "cacheVariables": {
         "CMAKE_HIP_FLAGS": "-parallel-jobs=4",
-        "AMDGPU_TARGETS": "gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+        "AMDGPU_TARGETS": "gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
       }
     },
     {
