@@ -75,7 +75,7 @@ RUN dnf install -y cuda-toolkit-${CUDA11VERSION//./-}
 ENV PATH=/usr/local/cuda-11/bin:$PATH
 ARG PARALLEL
 RUN --mount=type=cache,target=/root/.ccache \
-    cmake --preset 'CUDA 11' -DOLLAMA_RUNNER_DIR="cuda_v11" \
+    cmake --preset 'CUDA 11' \
         && cmake --build --parallel ${PARALLEL} --preset 'CUDA 11' \
         && cmake --install build --component CUDA --strip --parallel ${PARALLEL}
 
@@ -85,7 +85,7 @@ RUN dnf install -y cuda-toolkit-${CUDA12VERSION//./-}
 ENV PATH=/usr/local/cuda-12/bin:$PATH
 ARG PARALLEL
 RUN --mount=type=cache,target=/root/.ccache \
-    cmake --preset 'CUDA 12' -DOLLAMA_RUNNER_DIR="cuda_v12"\
+    cmake --preset 'CUDA 12' \
         && cmake --build --parallel ${PARALLEL} --preset 'CUDA 12' \
         && cmake --install build --component CUDA --strip --parallel ${PARALLEL}
 
@@ -96,7 +96,7 @@ RUN dnf install -y cuda-toolkit-${CUDA13VERSION//./-}
 ENV PATH=/usr/local/cuda-13/bin:$PATH
 ARG PARALLEL
 RUN --mount=type=cache,target=/root/.ccache \
-    cmake --preset 'CUDA 13' -DOLLAMA_RUNNER_DIR="cuda_v13" \
+    cmake --preset 'CUDA 13' \
         && cmake --build --parallel ${PARALLEL} --preset 'CUDA 13' \
         && cmake --install build --component CUDA --strip --parallel ${PARALLEL}
 
@@ -127,7 +127,7 @@ COPY CMakeLists.txt CMakePresets.json .
 COPY ml/backend/ggml/ggml ml/backend/ggml/ggml
 ARG PARALLEL
 RUN --mount=type=cache,target=/root/.ccache \
-    cmake --preset 'JetPack 5' -DOLLAMA_RUNNER_DIR="cuda_jetpack5" \
+    cmake --preset 'JetPack 5' \
         && cmake --build --parallel ${PARALLEL} --preset 'JetPack 5' \
         && cmake --install build --component CUDA --strip --parallel ${PARALLEL}
 
@@ -139,13 +139,13 @@ COPY CMakeLists.txt CMakePresets.json .
 COPY ml/backend/ggml/ggml ml/backend/ggml/ggml
 ARG PARALLEL
 RUN --mount=type=cache,target=/root/.ccache \
-    cmake --preset 'JetPack 6' -DOLLAMA_RUNNER_DIR="cuda_jetpack6" \
+    cmake --preset 'JetPack 6' \
         && cmake --build --parallel ${PARALLEL} --preset 'JetPack 6' \
         && cmake --install build --component CUDA --strip --parallel ${PARALLEL}
 
 FROM base AS vulkan
 RUN --mount=type=cache,target=/root/.ccache \
-    cmake --preset 'Vulkan' -DOLLAMA_RUNNER_DIR="vulkan" \
+    cmake --preset 'Vulkan' \
         && cmake --build --parallel --preset 'Vulkan' \
         && cmake --install build --component Vulkan --strip --parallel 8 
 
