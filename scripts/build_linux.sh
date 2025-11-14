@@ -13,7 +13,6 @@ set -eu
 . $(dirname $0)/env.sh
 
 mkdir -p dist
-NOVULKAN=${NOVULKAN:-""}
 
 docker buildx build \
         --output type=local,dest=./dist/ \
