@@ -1,21 +1,14 @@
 # Notes:
 This branch is a "not really a fork", some Dockerfile optimizations for AMD APUS.
-Tested on AMD Ryzen 7000 series APU. Needs >=6.10 Linux kernel.
+Needs >=6.10 Linux kernel.
 Intended for use in container environments such as Podman and Docker, but can be used to custom builds.
-
-For Vega AMD APUs (AMD Ryzen 2000, 4000 and 5000 Series with Vega Graphics), may run with the recently added Vulkan backend (Ollama v0.12.6), an there is this container image that supports pre Ollama v0.12.4 GTT memory enablemente patches `ghcr.io/rjmalagon/ollama-linux-amd-apu:gfx900-v0.12.2` from code preserved on branch `legacy-gfx900`.
+This merge Vulkan, ROCm v6 and v7, in one universal image. Some autodetection is included, but it may not work for all APUs.
 
 ## Almost/maybe supported APUs
-| **LLVM Target** | **APU GPU** |
-|-----------------|---------------------|
-| gfx1010 | AMD Ryzen 5000 Series with RDNA1 Graphics |
-| gfx1030 | AMD Ryzen 6000 Series with RDNA2 Graphics |
-| gfx1030 | AMD Ryzen 7000 Series with RDNA2 Graphics |
-| gfx1100 | RDNA3 based APUs |
-| gfx1151 | RDNA3.5 based APUs |
-| gfx1200 | RDNA4 based APUs |
-
-"gfx900" from AMD Ryzen 5000 Series with Vega Graphics and earlier are not supported on ROCM, may work on Vulkan backend.
+To manually select runtimes:
+- Vega AMD APUs (AMD Ryzen 2000, 4000 and 5000 Series with Vega Graphics) use the Vulkan backend with the `LLAMA_LLM_LIBRARY="vulkan"` and `OLLAMA_VULKAN=1`.
+- Early RDNA2 AMD APUs (AMD Ryzen 5000, 6000 and Series with RDNA2 Graphics) is recommended to use the ROCm v6 backend with the `LLAMA_LLM_LIBRARY="rocm_v6"`, V7 ROCm runtime may crash with flash attention enabled.
+- RDNA2, RDNA3 and RDNA3.5 AMD APUs (AMD Ryzen 9000 Series with RDNA3 Graphics) is recommended to use the ROCm v7 backend with the `LLAMA_LLM_LIBRARY="rocm_v7"`.
 
 ## How to build on Docker:
 Just like:
@@ -43,7 +36,7 @@ You can test my container image on ghcr.io/rjmalagon/ollama-linux-amd-apu:optm-l
 Example on how to run this image on Podman with an Ryzen 7000 Series APU, with flash attention and quantized KV cache, listen on localhost.
 
 ```shell
-podman run --name ollama  -v /local/data/path/:/root/.ollama:Z -e OLLAMA_FLASH_ATTENTION=true -e HSA_OVERRIDE_GFX_VERSION="10.3.0" -e OLLAMA_KV_CACHE_TYPE="q8_0" --device /dev/kfd --device /dev/dri -e OLLAMA_DEBUG=0 -p 127.0.0.1:11434:11434 ghcr.io/rjmalagon/ollama-linux-amd-apu:optm-latest serve
+podman run --name ollama  -v /local/data/path/:/root/.ollama:Z -e OLLAMA_FLASH_ATTENTION=true -e OLLAMA_LLM_LIBRARY="rocm_v6" -e HSA_OVERRIDE_GFX_VERSION="10.3.0" -e OLLAMA_KV_CACHE_TYPE="q8_0" --device /dev/kfd --device /dev/dri -e OLLAMA_DEBUG=0 -p 127.0.0.1:11434:11434 ghcr.io/rjmalagon/ollama-linux-amd-apu:optm-latest serve
 ```
 ### Check amount of GTT memory
  You can check the amount of shared memory (GTT memory) by using this command
@@ -67,6 +60,7 @@ The default value is half of system memory.
  ## Mentions
  Kudos to @phueper for the Dockerfile expanded ROCM dependencies and to @winstonma for the valuable GTT memory adjustment info.
 
+# From mainstream Ollama README.md @ v013.0:
 <div align="center">
   <a href="https://ollama.com">
     <img alt="ollama" width="240" src="https://github.com/ollama/ollama/assets/3325447/0d0b44e2-8f4a-4e99-9b52-a5c1c741c8f7">
@@ -490,7 +484,7 @@ See the [API documentation](./docs/api.md) for all endpoints.
 - [AppFlowy](https://github.com/AppFlowy-IO/AppFlowy) (AI collaborative workspace with Ollama, cross-platform and self-hostable)
 - [Lumina](https://github.com/cushydigit/lumina.git) (A lightweight, minimal React.js frontend for interacting with Ollama servers)
 - [Tiny Notepad](https://pypi.org/project/tiny-notepad) (A lightweight, notepad-like interface to chat with ollama available on PyPI)
-- [macLlama (macOS native)](https://github.com/hellotunamayo/macLlama) (A native macOS GUI application for interacting with Ollama models, featuring a chat interface.)
+- [macLlama (macOS native)](https://github.com/hellotunamayo/macLlama) (A native macOS GUI application for interacting with Ollama models, featuring a chat interface.) 
 - [GPTranslate](https://github.com/philberndt/GPTranslate) (A fast and lightweight, AI powered desktop translation application written with Rust and Tauri. Features real-time translation with OpenAI/Azure/Ollama.)
 - [ollama launcher](https://github.com/NGC13009/ollama-launcher) (A launcher for Ollama, aiming to provide users with convenient functions such as ollama server launching, management, or configuration.)
 - [ai-hub](https://github.com/Aj-Seven/ai-hub) (AI Hub supports multiple models via API keys and Chat support via Ollama API.)
