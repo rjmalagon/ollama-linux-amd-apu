@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
+	"os"
 )
 
 const LevelTrace slog.Level = -8
@@ -28,7 +29,7 @@ func NewLogger(w io.Writer, level slog.Level) *slog.Logger {
 			}
 			return attr
 		},
-	}))
+	})).With(slog.Int("PID", os.Getpid()))
 }
 
 type key string

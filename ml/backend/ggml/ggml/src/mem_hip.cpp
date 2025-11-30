@@ -459,7 +459,9 @@ int ggml_hip_get_device_memory(const char *id, size_t *free, size_t *total) {
     GGML_LOG_INFO("%s searching for device %s\n", __func__, id);
     const std::string drmDeviceGlob = "/sys/class/drm/card*/device/uevent";
     const std::string drmTotalMemoryFile = "mem_info_vram_total";
+    const std::string drmTotalGttFile = "mem_info_gtt_total";
     const std::string drmUsedMemoryFile = "mem_info_vram_used";
+    const std::string drmUsedGttFile = "mem_info_gtt_used";
     const std::string drmUeventPCISlotLabel = "PCI_SLOT_NAME=";
 
     glob_t glob_result;
@@ -497,6 +499,16 @@ int ggml_hip_get_device_memory(const char *id, size_t *free, size_t *total) {
                     totalFileStream >> memory;
                     *total = memory;
 
+                    std::string totalGttFile = dir + "/" + drmTotalGttFile;
+                    std::ifstream totalGttFileStream(totalGttFile.c_str());
+                    if (!totalGttFileStream.is_open()) {
+                        GGML_LOG_DEBUG("%s Failed to read GTT sysfs node %s\n", __func__, totalGttFile.c_str());
+                    } else {
+                        uint64_t gttMemory;
+                        totalGttFileStream >> gttMemory;
+                        *total += gttMemory;
+                    }
+
                     std::string usedFile = dir + "/" + drmUsedMemoryFile;
                     std::ifstream usedFileStream(usedFile.c_str());
                     if (!usedFileStream.is_open()) {
@@ -508,7 +520,18 @@ int ggml_hip_get_device_memory(const char *id, size_t *free, size_t *total) {
 
                     uint64_t memoryUsed;
                     usedFileStream >> memoryUsed;
-                    *free = memory - memoryUsed;
+                    *free = *total - memoryUsed;
+
+                    std::string usedGttFile = dir + "/" + drmUsedGttFile;
+                    std::ifstream usedGttFileStream(usedGttFile.c_str());
+                    if (!usedGttFileStream.is_open()) {
+                        GGML_LOG_DEBUG("%s Failed to read sysfs node %s\n", __func__, usedGttFile.c_str());
+                    } else {
+                        uint64_t gttMemoryUsed;
+                        usedGttFileStream >> gttMemoryUsed;
+                        *free -= gttMemoryUsed;
+                    }
+
 
                     file.close();
                     globfree(&glob_result);
