@@ -603,14 +603,7 @@ static ggml_backend_reg_t ggml_backend_load_best(const char * name, bool silent,
         for (const auto & search_path : search_paths) {
             fs::path filename = backend_filename_prefix().native() + name_path.native() + backend_filename_extension().native();
             fs::path path = search_path / filename;
-<<<<<<< HEAD
-            if (fs::exists(path)) {
-#ifndef NDEBUG
-                GGML_LOG_DEBUG("attempting to load base backend: %s\n", path.native().c_str());
-#endif
-=======
             if (std::error_code ec; fs::exists(path, ec)) {
->>>>>>> original
                 return get_reg().load_backend(path, silent);
             } else {
                 if (ec) {
@@ -621,9 +614,6 @@ static ggml_backend_reg_t ggml_backend_load_best(const char * name, bool silent,
         return nullptr;
     }
 
-#ifndef NDEBUG
-    GGML_LOG_DEBUG("attempting to load: %s\n", best_path.native().c_str());
-#endif
     return get_reg().load_backend(best_path, silent);
 }
 

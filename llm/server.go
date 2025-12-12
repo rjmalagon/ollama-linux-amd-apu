@@ -391,7 +391,7 @@ func StartRunner(ollamaEngine bool, modelPath string, gpuLibs []string, out io.W
 	}
 
 	slog.Info("starting runner", "cmd", cmd)
-	slog.Debug("subprocess", "filteredEnv", filteredEnv(cmd.Env))
+	slog.Debug("subprocess", "", filteredEnv(cmd.Env))
 
 	if err = cmd.Start(); err != nil {
 		return nil, 0, err
@@ -646,10 +646,7 @@ func (s *llamaServer) Load(ctx context.Context, systemInfo ml.SystemInfo, system
 		s.loadRequest.UseMmap = false
 	}
 
-	slog.Debug("waiting for runner...")
-
 	if err := s.waitUntilRunnerLaunched(ctx); err != nil {
-		slog.Debug("waiting for runner failed", "err", err)
 		return nil, err
 	}
 
@@ -1384,18 +1381,14 @@ object ::=
   "{" ws (
          string ":" ws value
     ("," ws string ":" ws value)*
-  )? ws "}"
 array  ::=
   "[" ws (
             value
     ("," ws value)*
-  )? ws "]"
 string ::=
   "\"" (
     [^"\\\x7F\x00-\x1F] |
     "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]) # escapes
-  )* "\""
-number ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)?
 # Optional space: by convention, applied in this grammar after literal chars when allowed
 ws ::= ([ \t\n] ws)?
 `
@@ -1474,8 +1467,6 @@ type CompletionResponse struct {
 
 func (s *llmServer) Completion(ctx context.Context, req CompletionRequest, fn func(CompletionResponse)) error {
 	slog.Debug("completion request", "images", len(req.Images), "prompt", len(req.Prompt), "format", string(req.Format))
-	// 	phueper: log prompt in Info level to check our prompts
-	slog.Info("completion request", "prompt", req.Prompt)
 	logutil.Trace("completion request", "prompt", req.Prompt)
 
 	if len(req.Format) > 0 {
