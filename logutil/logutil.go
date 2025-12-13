@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
-	"os"
 )
 
 const LevelTrace slog.Level = -8
