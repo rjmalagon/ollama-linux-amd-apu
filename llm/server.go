@@ -51,7 +51,6 @@ func (e filteredEnv) LogValue() slog.Value {
 				strings.HasPrefix(key, "GPU_"),
 				strings.HasPrefix(key, "HSA_"),
 				strings.HasPrefix(key, "GGML_"),
-				strings.HasPrefix(key, "AMD_"),
 				slices.Contains([]string{
 					"PATH",
 					"LD_LIBRARY_PATH",
@@ -1418,14 +1417,18 @@ object ::=
   "{" ws (
          string ":" ws value
     ("," ws string ":" ws value)*
+  )? ws "}" 
 array  ::=
   "[" ws (
             value
     ("," ws value)*
+  )? ws "]" 
 string ::=
   "\"" (
     [^"\\\x7F\x00-\x1F] |
     "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]) # escapes
+  )* "\"" 
+number ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)? 
 # Optional space: by convention, applied in this grammar after literal chars when allowed
 ws ::= ([ \t\n] ws)?
 `
