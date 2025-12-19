@@ -9,6 +9,7 @@ To manually select runtimes:
 - Vega AMD APUs (AMD Ryzen 2000, 4000 and 5000 Series with Vega Graphics) use the Vulkan backend with the `LLAMA_LLM_LIBRARY="vulkan"` and `OLLAMA_VULKAN=1`.
 - Early RDNA2 AMD APUs (AMD Ryzen 5000, 6000 and Series with RDNA2 Graphics) is recommended to use the ROCm v6 backend with the `LLAMA_LLM_LIBRARY="rocm_v6"`, V7 ROCm runtime may crash with flash attention enabled.
 - RDNA2, RDNA3 and RDNA3.5 AMD APUs (AMD Ryzen 9000 Series with RDNA3 Graphics) is recommended to use the ROCm v7 backend with the `LLAMA_LLM_LIBRARY="rocm_v7"`.
+- Since Ollama v0.13.3 flash attention is not working properly on RDNA2 AMD APUs on both ROCm v6 and v7 backends, `OLLAMA_FLASH_ATTENTION=false` can be used to disable it.
 
 ## How to build on Docker:
 Just like:
