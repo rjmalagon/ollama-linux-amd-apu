@@ -148,8 +148,6 @@ RUN --mount=type=cache,target=/root/.ccache \
     cmake --preset 'Vulkan' \
         && cmake --build --parallel --preset 'Vulkan' \
         && cmake --install build --component Vulkan --strip --parallel 8
-<<<<<<< HEAD
-=======
 
 FROM base AS mlx
 ARG CUDA13VERSION=13.0
@@ -182,7 +180,6 @@ ARG CGO_CXXFLAGS
 # TODO wire up the actual MLX engine here instead of building the main binary...
 RUN mkdir -p dist/bin
 RUN go build -tags mlx -trimpath -buildmode=pie -o dist/bin/imagegen ./x/imagegen/cmd/engine
->>>>>>> original
 
 
 FROM base AS build
