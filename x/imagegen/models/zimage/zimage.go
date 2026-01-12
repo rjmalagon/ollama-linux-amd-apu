@@ -6,9 +6,9 @@ package zimage
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 
+	"github.com/ollama/ollama/x/imagegen"
 	"github.com/ollama/ollama/x/imagegen/cache"
 	"github.com/ollama/ollama/x/imagegen/mlx"
 	"github.com/ollama/ollama/x/imagegen/tokenizer"
@@ -26,10 +26,12 @@ type GenerateConfig struct {
 	Progress       ProgressFunc // Optional progress callback
 	CapturePath    string       // GPU capture path (debug)
 
-	// Layer caching options (speedup via shallow layer reuse)
-	LayerCache    bool // Enable layer caching (default: false)
-	CacheInterval int  // Refresh cache every N steps (default: 3)
-	CacheLayers   int  // Number of shallow layers to cache (default: 15)
+	// TeaCache options (timestep embedding aware caching)
+	TeaCache          bool    // TeaCache is always enabled for faster inference
+	TeaCacheThreshold float32 // Threshold for cache reuse (default: 0.1, lower = more aggressive)
+
+	// Fused QKV (fuse Q/K/V projections into single matmul)
+	FusedQKV bool // Enable fused QKV projection (default: false)
 }
 
 // ProgressFunc is called during generation with step progress.
@@ -37,16 +39,17 @@ type ProgressFunc func(step, totalSteps int)
 
 // Model represents a Z-Image diffusion model.
 type Model struct {
-	ModelPath   string
+	ModelName   string
 	Tokenizer   *tokenizer.Tokenizer
 	TextEncoder *Qwen3TextEncoder
 	Transformer *Transformer
 	VAEDecoder  *VAEDecoder
+	qkvFused    bool // Track if QKV has been fused (do only once)
 }
 
-// Load loads the Z-Image model from a directory.
-func (m *Model) Load(modelPath string) error {
-	fmt.Println("Loading Z-Image model...")
+// Load loads the Z-Image model from ollama blob storage.
+func (m *Model) Load(modelName string) error {
+	fmt.Printf("Loading Z-Image model from manifest: %s...\n", modelName)
 	start := time.Now()
 
 	if mlx.GPUIsAvailable() {
@@ -54,12 +57,34 @@ func (m *Model) Load(modelPath string) error {
 		mlx.EnableCompile()
 	}
 
-	m.ModelPath = modelPath
+	m.ModelName = modelName
 
-	// Load tokenizer
+	// Load manifest
+	manifest, err := imagegen.LoadManifest(modelName)
+	if err != nil {
+		return fmt.Errorf("load manifest: %w", err)
+	}
+
+	// Load tokenizer from manifest with config
 	fmt.Print("  Loading tokenizer... ")
-	tokenizerPath := filepath.Join(modelPath, "tokenizer", "tokenizer.json")
-	tok, err := tokenizer.Load(tokenizerPath)
+	tokData, err := manifest.ReadConfig("tokenizer/tokenizer.json")
+	if err != nil {
+		return fmt.Errorf("tokenizer: %w", err)
+	}
+
+	// Try to read tokenizer config files from manifest
+	tokConfig := &tokenizer.TokenizerConfig{}
+	if data, err := manifest.ReadConfig("tokenizer/tokenizer_config.json"); err == nil {
+		tokConfig.TokenizerConfigJSON = data
+	}
+	if data, err := manifest.ReadConfig("tokenizer/generation_config.json"); err == nil {
+		tokConfig.GenerationConfigJSON = data
+	}
+	if data, err := manifest.ReadConfig("tokenizer/special_tokens_map.json"); err == nil {
+		tokConfig.SpecialTokensMapJSON = data
+	}
+
+	tok, err := tokenizer.LoadFromBytesWithConfig(tokData, tokConfig)
 	if err != nil {
 		return fmt.Errorf("tokenizer: %w", err)
 	}
@@ -68,7 +93,7 @@ func (m *Model) Load(modelPath string) error {
 
 	// Load text encoder
 	m.TextEncoder = &Qwen3TextEncoder{}
-	if err := m.TextEncoder.Load(filepath.Join(modelPath, "text_encoder")); err != nil {
+	if err := m.TextEncoder.Load(manifest); err != nil {
 		return fmt.Errorf("text encoder: %w", err)
 	}
 	mlx.Eval(mlx.Collect(m.TextEncoder)...)
@@ -78,7 +103,7 @@ func (m *Model) Load(modelPath string) error {
 
 	// Load transformer
 	m.Transformer = &Transformer{}
-	if err := m.Transformer.Load(filepath.Join(modelPath, "transformer")); err != nil {
+	if err := m.Transformer.Load(manifest); err != nil {
 		return fmt.Errorf("transformer: %w", err)
 	}
 	mlx.Eval(mlx.Collect(m.Transformer)...)
@@ -88,7 +113,7 @@ func (m *Model) Load(modelPath string) error {
 
 	// Load VAE decoder
 	m.VAEDecoder = &VAEDecoder{}
-	if err := m.VAEDecoder.Load(filepath.Join(modelPath, "vae")); err != nil {
+	if err := m.VAEDecoder.Load(manifest); err != nil {
 		return fmt.Errorf("VAE decoder: %w", err)
 	}
 	mlx.Eval(mlx.Collect(m.VAEDecoder)...)
@@ -104,7 +129,7 @@ func (m *Model) Load(modelPath string) error {
 
 // Generate creates an image from a prompt.
 func (m *Model) Generate(prompt string, width, height int32, steps int, seed int64) (*mlx.Array, error) {
-	return m.GenerateFromConfig(&GenerateConfig{
+	return m.GenerateFromConfig(context.Background(), &GenerateConfig{
 		Prompt: prompt,
 		Width:  width,
 		Height: height,
@@ -115,7 +140,7 @@ func (m *Model) Generate(prompt string, width, height int32, steps int, seed int
 
 // GenerateWithProgress creates an image with progress callback.
 func (m *Model) GenerateWithProgress(prompt string, width, height int32, steps int, seed int64, progress ProgressFunc) (*mlx.Array, error) {
-	return m.GenerateFromConfig(&GenerateConfig{
+	return m.GenerateFromConfig(context.Background(), &GenerateConfig{
 		Prompt:   prompt,
 		Width:    width,
 		Height:   height,
@@ -127,7 +152,7 @@ func (m *Model) GenerateWithProgress(prompt string, width, height int32, steps i
 
 // GenerateWithCFG creates an image with classifier-free guidance.
 func (m *Model) GenerateWithCFG(prompt, negativePrompt string, width, height int32, steps int, seed int64, cfgScale float32, progress ProgressFunc) (*mlx.Array, error) {
-	return m.GenerateFromConfig(&GenerateConfig{
+	return m.GenerateFromConfig(context.Background(), &GenerateConfig{
 		Prompt:         prompt,
 		NegativePrompt: negativePrompt,
 		CFGScale:       cfgScale,
@@ -140,9 +165,9 @@ func (m *Model) GenerateWithCFG(prompt, negativePrompt string, width, height int
 }
 
 // GenerateFromConfig generates an image using the unified config struct.
-func (m *Model) GenerateFromConfig(cfg *GenerateConfig) (*mlx.Array, error) {
+func (m *Model) GenerateFromConfig(ctx context.Context, cfg *GenerateConfig) (*mlx.Array, error) {
 	start := time.Now()
-	result, err := m.generate(cfg)
+	result, err := m.generate(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +185,7 @@ func (m *Model) GenerateImage(ctx context.Context, prompt string, width, height 
 }
 
 // generate is the internal denoising pipeline.
-func (m *Model) generate(cfg *GenerateConfig) (*mlx.Array, error) {
+func (m *Model) generate(ctx context.Context, cfg *GenerateConfig) (*mlx.Array, error) {
 	// Apply defaults
 	if cfg.Width <= 0 {
 		cfg.Width = 1024
@@ -174,13 +199,17 @@ func (m *Model) generate(cfg *GenerateConfig) (*mlx.Array, error) {
 	if cfg.CFGScale <= 0 {
 		cfg.CFGScale = 4.0
 	}
-	if cfg.LayerCache {
-		if cfg.CacheInterval <= 0 {
-			cfg.CacheInterval = 3
-		}
-		if cfg.CacheLayers <= 0 {
-			cfg.CacheLayers = 15 // Half of 30 layers
-		}
+	// TeaCache enabled by default
+	cfg.TeaCache = true
+	if cfg.TeaCacheThreshold <= 0 {
+		cfg.TeaCacheThreshold = 0.15
+	}
+
+	// Enable fused QKV if requested (only fuse once)
+	if cfg.FusedQKV && !m.qkvFused {
+		m.Transformer.FuseAllQKV()
+		m.qkvFused = true
+		fmt.Println("  Fused QKV enabled")
 	}
 
 	useCFG := cfg.NegativePrompt != ""
@@ -238,20 +267,71 @@ func (m *Model) generate(cfg *GenerateConfig) (*mlx.Array, error) {
 		mlx.Eval(ropeCache.UnifiedCos)
 	}
 
-	// Step cache for shallow layer reuse (DeepCache/Learning-to-Cache style)
-	var stepCache *cache.StepCache
-	if cfg.LayerCache {
-		stepCache = cache.NewStepCache(cfg.CacheLayers)
-		fmt.Printf("  Layer caching enabled: %d layers, refresh every %d steps\n",
-			cfg.CacheLayers, cfg.CacheInterval)
+	// Pre-compute batched embeddings for CFG (outside the loop for efficiency)
+	var batchedEmb *mlx.Array
+	if useCFG {
+		// Concatenate embeddings once: [1, L, D] + [1, L, D] -> [2, L, D]
+		batchedEmb = mlx.Concatenate([]*mlx.Array{posEmb, negEmb}, 0)
+		mlx.Keep(batchedEmb)
+		mlx.Eval(batchedEmb)
+	}
+
+	// TeaCache for timestep-aware caching
+	// For CFG mode, we cache pos/neg separately, skip early steps, and always compute CFG fresh
+	var teaCache *cache.TeaCache
+	if cfg.TeaCache {
+		skipEarly := 0
+		if useCFG {
+			skipEarly = 3 // Skip first 3 steps for CFG to preserve structure
+		}
+		teaCache = cache.NewTeaCache(&cache.TeaCacheConfig{
+			Threshold:      cfg.TeaCacheThreshold,
+			RescaleFactor:  1.0,
+			SkipEarlySteps: skipEarly,
+		})
+		if useCFG {
+			fmt.Printf("  TeaCache enabled (CFG mode): threshold=%.2f, skip first %d steps\n", cfg.TeaCacheThreshold, skipEarly)
+		} else {
+			fmt.Printf("  TeaCache enabled: threshold=%.2f\n", cfg.TeaCacheThreshold)
+		}
+	}
+
+	// cleanup frees all kept arrays when we need to abort early
+	cleanup := func() {
+		posEmb.Free()
+		if negEmb != nil {
+			negEmb.Free()
+		}
+		ropeCache.ImgCos.Free()
+		ropeCache.ImgSin.Free()
+		ropeCache.CapCos.Free()
+		ropeCache.CapSin.Free()
+		ropeCache.UnifiedCos.Free()
+		ropeCache.UnifiedSin.Free()
+		if batchedEmb != nil {
+			batchedEmb.Free()
+		}
+		if teaCache != nil {
+			teaCache.Free()
+		}
+		latents.Free()
 	}
 
 	// Denoising loop
+	if cfg.Progress != nil {
+		cfg.Progress(0, cfg.Steps) // Start at 0%
+	}
 	for i := 0; i < cfg.Steps; i++ {
-		stepStart := time.Now()
-		if cfg.Progress != nil {
-			cfg.Progress(i+1, cfg.Steps)
+		// Check for cancellation
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				cleanup()
+				return nil, ctx.Err()
+			default:
+			}
 		}
+		stepStart := time.Now()
 
 		// GPU capture on step 2 if requested
 		if cfg.CapturePath != "" && i == 1 {
@@ -259,49 +339,77 @@ func (m *Model) generate(cfg *GenerateConfig) (*mlx.Array, error) {
 		}
 
 		tCurr := scheduler.Timesteps[i]
-		timestep := mlx.ToBFloat16(mlx.NewArray([]float32{1.0 - tCurr}, []int32{1}))
+		var noisePred *mlx.Array
 
-		patches := PatchifyLatents(latents, tcfg.PatchSize)
+		// TeaCache: check if we should compute or reuse cached output
+		shouldCompute := teaCache == nil || teaCache.ShouldCompute(i, tCurr)
 
-		var output *mlx.Array
-		if stepCache != nil {
-			// Use layer caching for faster inference
+		if shouldCompute {
+			timestep := mlx.ToBFloat16(mlx.NewArray([]float32{1.0 - tCurr}, []int32{1}))
+			patches := PatchifyLatents(latents, tcfg.PatchSize)
+
+			var output *mlx.Array
 			if useCFG {
-				posOutput := m.Transformer.ForwardWithCache(patches, timestep, posEmb, ropeCache,
-					stepCache, i, cfg.CacheInterval)
-				// Note: CFG with layer cache shares the cache between pos/neg
-				// This is approximate but fast - neg prompt uses same cached shallow layers
-				negOutput := m.Transformer.ForwardWithCache(patches, timestep, negEmb, ropeCache,
-					stepCache, i, cfg.CacheInterval)
-				diff := mlx.Sub(posOutput, negOutput)
+				// CFG Batching: single forward pass with batch=2
+				// Tile patches: [1, L, D] -> [2, L, D]
+				batchedPatches := mlx.Tile(patches, []int32{2, 1, 1})
+				// Tile timestep: [1] -> [2]
+				batchedTimestep := mlx.Tile(timestep, []int32{2})
+
+				// Single batched forward pass (RoPE broadcasts from [1,L,H,D] to [2,L,H,D])
+				batchedOutput := m.Transformer.Forward(batchedPatches, batchedTimestep, batchedEmb, ropeCache)
+
+				// Split output: [2, L, D] -> pos [1, L, D], neg [1, L, D]
+				outputShape := batchedOutput.Shape()
+				L := outputShape[1]
+				D := outputShape[2]
+				posOutput := mlx.Slice(batchedOutput, []int32{0, 0, 0}, []int32{1, L, D})
+				negOutput := mlx.Slice(batchedOutput, []int32{1, 0, 0}, []int32{2, L, D})
+
+				// Convert to noise predictions (unpatchify and negate)
+				posPred := UnpatchifyLatents(posOutput, tcfg.PatchSize, latentH, latentW, tcfg.InChannels)
+				posPred = mlx.Neg(posPred)
+				negPred := UnpatchifyLatents(negOutput, tcfg.PatchSize, latentH, latentW, tcfg.InChannels)
+				negPred = mlx.Neg(negPred)
+
+				// Cache pos/neg separately for TeaCache
+				if teaCache != nil {
+					teaCache.UpdateCFGCache(posPred, negPred, tCurr)
+					mlx.Keep(teaCache.Arrays()...)
+				}
+
+				// Apply CFG: noisePred = neg + scale * (pos - neg)
+				diff := mlx.Sub(posPred, negPred)
 				scaledDiff := mlx.MulScalar(diff, cfg.CFGScale)
-				output = mlx.Add(negOutput, scaledDiff)
+				noisePred = mlx.Add(negPred, scaledDiff)
 			} else {
-				output = m.Transformer.ForwardWithCache(patches, timestep, posEmb, ropeCache,
-					stepCache, i, cfg.CacheInterval)
-			}
-		} else {
-			// Standard forward without caching
-			if useCFG {
-				posOutput := m.Transformer.Forward(patches, timestep, posEmb, ropeCache)
-				negOutput := m.Transformer.Forward(patches, timestep, negEmb, ropeCache)
-				diff := mlx.Sub(posOutput, negOutput)
-				scaledDiff := mlx.MulScalar(diff, cfg.CFGScale)
-				output = mlx.Add(negOutput, scaledDiff)
-			} else {
+				// Non-CFG forward pass
 				output = m.Transformer.Forward(patches, timestep, posEmb, ropeCache)
+				noisePred = UnpatchifyLatents(output, tcfg.PatchSize, latentH, latentW, tcfg.InChannels)
+				noisePred = mlx.Neg(noisePred)
+
+				// Update TeaCache
+				if teaCache != nil {
+					teaCache.UpdateCache(noisePred, tCurr)
+					mlx.Keep(teaCache.Arrays()...)
+				}
 			}
+		} else if useCFG && teaCache != nil && teaCache.HasCFGCache() {
+			// CFG mode: get cached pos/neg and compute CFG fresh
+			posPred, negPred := teaCache.GetCFGCached()
+			diff := mlx.Sub(posPred, negPred)
+			scaledDiff := mlx.MulScalar(diff, cfg.CFGScale)
+			noisePred = mlx.Add(negPred, scaledDiff)
+			fmt.Printf("    [TeaCache: reusing cached pos/neg outputs]\n")
+		} else {
+			// Non-CFG mode: reuse cached noise prediction
+			noisePred = teaCache.GetCached()
+			fmt.Printf("    [TeaCache: reusing cached output]\n")
 		}
 
-		noisePred := UnpatchifyLatents(output, tcfg.PatchSize, latentH, latentW, tcfg.InChannels)
-		noisePred = mlx.Neg(noisePred)
 		oldLatents := latents
 		latents = scheduler.Step(noisePred, latents, i)
 
-		// Keep latents and any cached arrays
-		if stepCache != nil {
-			mlx.Keep(stepCache.Arrays()...)
-		}
 		mlx.Eval(latents)
 		oldLatents.Free()
 
@@ -313,6 +421,10 @@ func (m *Model) generate(cfg *GenerateConfig) (*mlx.Array, error) {
 		peakMem := float64(mlx.MetalGetPeakMemory()) / (1024 * 1024 * 1024)
 		fmt.Printf("  Step %d/%d: t=%.4f (%.2fs) [%.1f GB active, %.1f GB peak]\n",
 			i+1, cfg.Steps, tCurr, time.Since(stepStart).Seconds(), activeMem, peakMem)
+
+		if cfg.Progress != nil {
+			cfg.Progress(i+1, cfg.Steps) // Report completed step
+		}
 	}
 
 	// Free denoising temporaries before VAE decode
@@ -326,8 +438,14 @@ func (m *Model) generate(cfg *GenerateConfig) (*mlx.Array, error) {
 	ropeCache.CapSin.Free()
 	ropeCache.UnifiedCos.Free()
 	ropeCache.UnifiedSin.Free()
-	if stepCache != nil {
-		stepCache.Free()
+	if batchedEmb != nil {
+		batchedEmb.Free()
+	}
+	if teaCache != nil {
+		hits, misses := teaCache.Stats()
+		fmt.Printf("  TeaCache stats: %d hits, %d misses (%.1f%% cache rate)\n",
+			hits, misses, float64(hits)/float64(hits+misses)*100)
+		teaCache.Free()
 	}
 
 	// VAE decode

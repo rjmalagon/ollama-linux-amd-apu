@@ -3,12 +3,10 @@
 package zimage
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 
+	"github.com/ollama/ollama/x/imagegen"
 	"github.com/ollama/ollama/x/imagegen/mlx"
 	"github.com/ollama/ollama/x/imagegen/nn"
 	"github.com/ollama/ollama/x/imagegen/safetensors"
@@ -28,27 +26,14 @@ type Qwen3Config struct {
 	HeadDim           int32   `json:"head_dim"`
 }
 
-// loadQwen3Config loads text encoder config from a JSON file
-func loadQwen3Config(path string) (*Qwen3Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
-	}
-	var cfg Qwen3Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
-	}
-	return &cfg, nil
-}
-
 // Qwen3Attention implements Qwen3 attention with QK norms
 type Qwen3Attention struct {
-	QProj *nn.Linear  `weight:"q_proj"`
-	KProj *nn.Linear  `weight:"k_proj"`
-	VProj *nn.Linear  `weight:"v_proj"`
-	OProj *nn.Linear  `weight:"o_proj"`
-	QNorm *nn.RMSNorm `weight:"q_norm"`
-	KNorm *nn.RMSNorm `weight:"k_norm"`
+	QProj nn.LinearLayer `weight:"q_proj"`
+	KProj nn.LinearLayer `weight:"k_proj"`
+	VProj nn.LinearLayer `weight:"v_proj"`
+	OProj nn.LinearLayer `weight:"o_proj"`
+	QNorm *nn.RMSNorm    `weight:"q_norm"`
+	KNorm *nn.RMSNorm    `weight:"k_norm"`
 	// Computed fields
 	NHeads    int32
 	NKVHeads  int32
@@ -151,9 +136,9 @@ func repeatKV(x *mlx.Array, repeats int32) *mlx.Array {
 
 // Qwen3MLP implements Qwen3 SwiGLU MLP
 type Qwen3MLP struct {
-	GateProj *nn.Linear `weight:"gate_proj"`
-	UpProj   *nn.Linear `weight:"up_proj"`
-	DownProj *nn.Linear `weight:"down_proj"`
+	GateProj nn.LinearLayer `weight:"gate_proj"`
+	UpProj   nn.LinearLayer `weight:"up_proj"`
+	DownProj nn.LinearLayer `weight:"down_proj"`
 }
 
 // Forward applies the MLP
@@ -194,33 +179,44 @@ type Qwen3TextEncoder struct {
 	*Qwen3Config
 }
 
-// Load loads the Qwen3 text encoder from a directory
-func (m *Qwen3TextEncoder) Load(path string) error {
-	fmt.Println("Loading Qwen3 text encoder...")
+// Load loads the Qwen3 text encoder from ollama blob storage.
+func (m *Qwen3TextEncoder) Load(manifest *imagegen.ModelManifest) error {
+	fmt.Print("  Loading text encoder... ")
 
-	// Load config
-	cfg, err := loadQwen3Config(filepath.Join(path, "config.json"))
-	if err != nil {
+	// Load config from blob
+	var cfg Qwen3Config
+	if err := manifest.ReadConfigJSON("text_encoder/config.json", &cfg); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
-	m.Qwen3Config = cfg
-
-	// Pre-allocate layers slice
+	m.Qwen3Config = &cfg
 	m.Layers = make([]*Qwen3Block, cfg.NumHiddenLayers)
 
-	// Load weights
-	weights, err := safetensors.LoadModelWeights(path)
+	// Load weights from tensor blobs
+	weights, err := imagegen.LoadWeightsFromManifest(manifest, "text_encoder")
 	if err != nil {
 		return fmt.Errorf("weights: %w", err)
 	}
+	if err := weights.Load(0); err != nil {
+		return fmt.Errorf("load weights: %w", err)
+	}
+	defer weights.ReleaseAll()
 
-	fmt.Print("  Loading weights via struct tags... ")
+	return m.loadWeights(weights)
+}
+
+// loadWeights loads weights from any WeightSource into the model
+func (m *Qwen3TextEncoder) loadWeights(weights safetensors.WeightSource) error {
 	if err := safetensors.LoadModule(m, weights, ""); err != nil {
 		return fmt.Errorf("load module: %w", err)
 	}
+	m.initComputedFields()
 	fmt.Println("✓")
+	return nil
+}
 
-	// Initialize computed fields
+// initComputedFields initializes computed fields after loading weights
+func (m *Qwen3TextEncoder) initComputedFields() {
+	cfg := m.Qwen3Config
 	m.FinalNorm.Eps = cfg.RMSNormEps
 	for _, block := range m.Layers {
 		// Attention
@@ -235,9 +231,6 @@ func (m *Qwen3TextEncoder) Load(path string) error {
 		block.InputLayerNorm.Eps = cfg.RMSNormEps
 		block.PostAttnLayerNorm.Eps = cfg.RMSNormEps
 	}
-
-	weights.ReleaseAll()
-	return nil
 }
 
 // Forward encodes text tokens

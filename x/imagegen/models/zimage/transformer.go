@@ -4,12 +4,10 @@
 package zimage
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 
+	"github.com/ollama/ollama/x/imagegen"
 	"github.com/ollama/ollama/x/imagegen/cache"
 	"github.com/ollama/ollama/x/imagegen/mlx"
 	"github.com/ollama/ollama/x/imagegen/nn"
@@ -38,8 +36,8 @@ type TransformerConfig struct {
 // TimestepEmbedder creates sinusoidal timestep embeddings
 // Output dimension is 256 (fixed), used for AdaLN modulation
 type TimestepEmbedder struct {
-	Linear1       *nn.Linear `weight:"mlp.0"`
-	Linear2       *nn.Linear `weight:"mlp.2"`
+	Linear1       nn.LinearLayer `weight:"mlp.0"`
+	Linear2       nn.LinearLayer `weight:"mlp.2"`
 	FreqEmbedSize int32      // 256 (computed)
 }
 
@@ -76,7 +74,7 @@ func (te *TimestepEmbedder) Forward(t *mlx.Array) *mlx.Array {
 
 // XEmbedder embeds image patches to model dimension
 type XEmbedder struct {
-	Linear *nn.Linear `weight:"2-1"`
+	Linear nn.LinearLayer `weight:"2-1"`
 }
 
 // Forward embeds patchified image latents
@@ -88,7 +86,7 @@ func (xe *XEmbedder) Forward(x *mlx.Array) *mlx.Array {
 // CapEmbedder projects caption features to model dimension
 type CapEmbedder struct {
 	Norm     *nn.RMSNorm `weight:"0"`
-	Linear   *nn.Linear  `weight:"1"`
+	Linear   nn.LinearLayer  `weight:"1"`
 	PadToken *mlx.Array  // loaded separately at root level
 }
 
@@ -102,11 +100,12 @@ func (ce *CapEmbedder) Forward(capFeats *mlx.Array) *mlx.Array {
 
 // FeedForward implements SwiGLU FFN
 type FeedForward struct {
-	W1     *nn.Linear `weight:"w1"` // gate projection
-	W2     *nn.Linear `weight:"w2"` // down projection
-	W3     *nn.Linear `weight:"w3"` // up projection
+	W1     nn.LinearLayer `weight:"w1"` // gate projection
+	W2     nn.LinearLayer `weight:"w2"` // down projection
+	W3     nn.LinearLayer `weight:"w3"` // up projection
 	OutDim int32      // computed from W2
 }
+
 
 // Forward applies SwiGLU: silu(W1(x)) * W3(x), then W2
 func (ff *FeedForward) Forward(x *mlx.Array) *mlx.Array {
@@ -117,6 +116,7 @@ func (ff *FeedForward) Forward(x *mlx.Array) *mlx.Array {
 
 	// Reshape for matmul
 	x = mlx.Reshape(x, B*L, D)
+
 	gate := ff.W1.Forward(x)
 	gate = mlx.SiLU(gate)
 	up := ff.W3.Forward(x)
@@ -128,17 +128,69 @@ func (ff *FeedForward) Forward(x *mlx.Array) *mlx.Array {
 
 // Attention implements multi-head attention with QK norm
 type Attention struct {
-	ToQ   *nn.Linear `weight:"to_q"`
-	ToK   *nn.Linear `weight:"to_k"`
-	ToV   *nn.Linear `weight:"to_v"`
-	ToOut *nn.Linear `weight:"to_out.0"`
+	ToQ   nn.LinearLayer `weight:"to_q"`
+	ToK   nn.LinearLayer `weight:"to_k"`
+	ToV   nn.LinearLayer `weight:"to_v"`
+	ToOut nn.LinearLayer `weight:"to_out.0"`
 	NormQ *mlx.Array `weight:"norm_q.weight"` // [head_dim] for per-head RMSNorm
 	NormK *mlx.Array `weight:"norm_k.weight"`
-	// Computed fields
-	NHeads  int32
-	HeadDim int32
-	Dim     int32
-	Scale   float32
+	// Fused QKV (computed at init time for efficiency, not loaded from weights)
+	ToQKV nn.LinearLayer `weight:"-"` // Fused Q+K+V projection (created by FuseQKV)
+	Fused bool       `weight:"-"` // Whether to use fused QKV path
+	// Computed fields (not loaded from weights)
+	NHeads  int32   `weight:"-"`
+	HeadDim int32   `weight:"-"`
+	Dim     int32   `weight:"-"`
+	Scale   float32 `weight:"-"`
+}
+
+// FuseQKV creates a fused QKV projection by concatenating weights.
+// This reduces 3 matmuls to 1 for a ~5-10% speedup.
+// Note: Fusion is skipped for quantized weights as it would require complex
+// dequant-concat-requant operations. The FP8 memory bandwidth savings outweigh
+// the ~5% fusion benefit.
+func (attn *Attention) FuseQKV() {
+	if attn.ToQ == nil || attn.ToK == nil || attn.ToV == nil {
+		return
+	}
+
+	// Skip fusion for quantized weights - type assert to check
+	toQ, qOk := attn.ToQ.(*nn.Linear)
+	toK, kOk := attn.ToK.(*nn.Linear)
+	toV, vOk := attn.ToV.(*nn.Linear)
+	if !qOk || !kOk || !vOk {
+		// One or more are QuantizedLinear, skip fusion
+		return
+	}
+
+	if toQ.Weight == nil || toK.Weight == nil || toV.Weight == nil {
+		return
+	}
+
+	// Concatenate weights: [dim, dim] x 3 -> [3*dim, dim]
+	// Weight shapes: ToQ.Weight [out_dim, in_dim], etc.
+	qWeight := toQ.Weight
+	kWeight := toK.Weight
+	vWeight := toV.Weight
+
+	// Concatenate along output dimension (axis 0)
+	fusedWeight := mlx.Concatenate([]*mlx.Array{qWeight, kWeight, vWeight}, 0)
+
+	// Evaluate fused weight to ensure it's materialized
+	mlx.Eval(fusedWeight)
+
+	// Create fused linear layer
+	fusedLinear := &nn.Linear{Weight: fusedWeight}
+
+	// Handle bias if present
+	if toQ.Bias != nil && toK.Bias != nil && toV.Bias != nil {
+		fusedBias := mlx.Concatenate([]*mlx.Array{toQ.Bias, toK.Bias, toV.Bias}, 0)
+		mlx.Eval(fusedBias)
+		fusedLinear.Bias = fusedBias
+	}
+
+	attn.ToQKV = fusedLinear
+	attn.Fused = true
 }
 
 // Forward computes attention
@@ -148,11 +200,24 @@ func (attn *Attention) Forward(x *mlx.Array, cos, sin *mlx.Array) *mlx.Array {
 	L := shape[1]
 	D := shape[2]
 
-	// Project Q, K, V
 	xFlat := mlx.Reshape(x, B*L, D)
-	q := attn.ToQ.Forward(xFlat)
-	k := attn.ToK.Forward(xFlat)
-	v := attn.ToV.Forward(xFlat)
+
+	var q, k, v *mlx.Array
+	if attn.Fused && attn.ToQKV != nil {
+		// Fused QKV path: single matmul then split
+		qkv := attn.ToQKV.Forward(xFlat) // [B*L, 3*dim]
+
+		// Split into Q, K, V along last dimension
+		// Each has shape [B*L, dim]
+		q = mlx.Slice(qkv, []int32{0, 0}, []int32{B * L, attn.Dim})
+		k = mlx.Slice(qkv, []int32{0, attn.Dim}, []int32{B * L, 2 * attn.Dim})
+		v = mlx.Slice(qkv, []int32{0, 2 * attn.Dim}, []int32{B * L, 3 * attn.Dim})
+	} else {
+		// Separate Q, K, V projections
+		q = attn.ToQ.Forward(xFlat)
+		k = attn.ToK.Forward(xFlat)
+		v = attn.ToV.Forward(xFlat)
+	}
 
 	// Reshape to [B, L, nheads, head_dim]
 	q = mlx.Reshape(q, B, L, attn.NHeads, attn.HeadDim)
@@ -229,7 +294,7 @@ type TransformerBlock struct {
 	AttentionNorm2 *nn.RMSNorm  `weight:"attention_norm2"`
 	FFNNorm1       *nn.RMSNorm  `weight:"ffn_norm1"`
 	FFNNorm2       *nn.RMSNorm  `weight:"ffn_norm2"`
-	AdaLN          *nn.Linear   `weight:"adaLN_modulation.0,optional"` // only if modulation
+	AdaLN          nn.LinearLayer   `weight:"adaLN_modulation.0,optional"` // only if modulation
 	// Computed fields
 	HasModulation bool
 	Dim           int32
@@ -283,8 +348,8 @@ func (tb *TransformerBlock) Forward(x *mlx.Array, adaln *mlx.Array, cos, sin *ml
 
 // FinalLayer outputs the denoised patches
 type FinalLayer struct {
-	AdaLN  *nn.Linear `weight:"adaLN_modulation.1"` // [256] -> [dim]
-	Output *nn.Linear `weight:"linear"`             // [dim] -> [out_channels]
+	AdaLN  nn.LinearLayer `weight:"adaLN_modulation.1"` // [256] -> [dim]
+	Output nn.LinearLayer `weight:"linear"`             // [dim] -> [out_channels]
 	OutDim int32      // computed from Output
 }
 
@@ -335,43 +400,50 @@ type Transformer struct {
 	*TransformerConfig
 }
 
-// Load loads the Z-Image transformer from a directory
-func (m *Transformer) Load(path string) error {
-	fmt.Println("Loading Z-Image transformer...")
+// Load loads the Z-Image transformer from ollama blob storage.
+func (m *Transformer) Load(manifest *imagegen.ModelManifest) error {
+	fmt.Print("  Loading transformer... ")
 
-	// Load config
-	cfg, err := loadTransformerConfig(filepath.Join(path, "config.json"))
-	if err != nil {
+	// Load config from blob
+	var cfg TransformerConfig
+	if err := manifest.ReadConfigJSON("transformer/config.json", &cfg); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
-	m.TransformerConfig = cfg
-
-	// Pre-allocate slices for loader
+	if len(cfg.AllPatchSize) > 0 {
+		cfg.PatchSize = cfg.AllPatchSize[0]
+	}
+	m.TransformerConfig = &cfg
 	m.NoiseRefiners = make([]*TransformerBlock, cfg.NRefinerLayers)
 	m.ContextRefiners = make([]*TransformerBlock, cfg.NRefinerLayers)
 	m.Layers = make([]*TransformerBlock, cfg.NLayers)
 
-	// Load weights
-	weights, err := safetensors.LoadModelWeights(path)
+	weights, err := imagegen.LoadWeightsFromManifest(manifest, "transformer")
 	if err != nil {
 		return fmt.Errorf("weights: %w", err)
 	}
-
-	fmt.Print("  Loading weights as bf16... ")
-	if err := weights.Load(mlx.DtypeBFloat16); err != nil {
+	if err := weights.Load(0); err != nil {
 		return fmt.Errorf("load weights: %w", err)
 	}
-	fmt.Printf("✓ (%.1f GB)\n", float64(mlx.MetalGetActiveMemory())/(1024*1024*1024))
+	defer weights.ReleaseAll()
 
-	fmt.Print("  Loading weights via struct tags... ")
+	return m.loadWeights(weights)
+}
+
+// loadWeights loads weights from any WeightSource into the model
+func (m *Transformer) loadWeights(weights safetensors.WeightSource) error {
 	if err := safetensors.LoadModule(m, weights, ""); err != nil {
 		return fmt.Errorf("load module: %w", err)
 	}
+	m.initComputedFields()
 	fmt.Println("✓")
+	return nil
+}
 
-	// Initialize computed fields
+// initComputedFields initializes computed fields after loading weights
+func (m *Transformer) initComputedFields() {
+	cfg := m.TransformerConfig
 	m.TEmbed.FreqEmbedSize = 256
-	m.FinalLayer.OutDim = m.FinalLayer.Output.Weight.Shape()[0]
+	m.FinalLayer.OutDim = m.FinalLayer.Output.OutputDim()
 	m.CapEmbed.Norm.Eps = 1e-6
 
 	for _, block := range m.NoiseRefiners {
@@ -383,26 +455,20 @@ func (m *Transformer) Load(path string) error {
 	for _, block := range m.Layers {
 		initTransformerBlock(block, cfg)
 	}
-
-	weights.ReleaseAll()
-	return nil
 }
 
-// loadTransformerConfig loads transformer config from a JSON file
-func loadTransformerConfig(path string) (*TransformerConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
+// FuseAllQKV fuses QKV projections in all attention layers for efficiency.
+// This reduces 3 matmuls to 1 per attention layer, providing ~5-10% speedup.
+func (m *Transformer) FuseAllQKV() {
+	for _, block := range m.NoiseRefiners {
+		block.Attention.FuseQKV()
 	}
-	var cfg TransformerConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	for _, block := range m.ContextRefiners {
+		block.Attention.FuseQKV()
 	}
-	// Extract PatchSize from array
-	if len(cfg.AllPatchSize) > 0 {
-		cfg.PatchSize = cfg.AllPatchSize[0]
+	for _, block := range m.Layers {
+		block.Attention.FuseQKV()
 	}
-	return &cfg, nil
 }
 
 // initTransformerBlock sets computed fields on a transformer block
@@ -418,7 +484,7 @@ func initTransformerBlock(block *TransformerBlock, cfg *TransformerConfig) {
 	attn.Scale = float32(1.0 / math.Sqrt(float64(attn.HeadDim)))
 
 	// Init feedforward OutDim
-	block.FeedForward.OutDim = block.FeedForward.W2.Weight.Shape()[0]
+	block.FeedForward.OutDim = block.FeedForward.W2.OutputDim()
 
 	// Set eps on all RMSNorm layers
 	block.AttentionNorm1.Eps = cfg.NormEps
@@ -437,6 +503,8 @@ type RoPECache struct {
 	UnifiedSin *mlx.Array
 	ImgLen     int32
 	CapLen     int32
+	GridH      int32 // Image token grid height
+	GridW      int32 // Image token grid width
 }
 
 // PrepareRoPECache precomputes RoPE values for the given image and caption lengths.
@@ -470,6 +538,8 @@ func (m *Transformer) PrepareRoPECache(hTok, wTok, capLen int32) *RoPECache {
 		UnifiedSin: unifiedSin,
 		ImgLen:     imgLen,
 		CapLen:     capLen,
+		GridH:      hTok,
+		GridW:      wTok,
 	}
 }
 
