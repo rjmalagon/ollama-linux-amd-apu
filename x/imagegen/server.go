@@ -14,7 +14,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,7 +72,7 @@ func NewServer(modelName string) (*Server, error) {
 		port = rand.Intn(65535-49152) + 49152
 	}
 
-	// Get the ollama executable path
+	// Get the ollama-mlx executable path (in same directory as current executable)
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("unable to lookup executable path: %w", err)
@@ -78,10 +80,41 @@ func NewServer(modelName string) (*Server, error) {
 	if eval, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = eval
 	}
+	mlxExe := filepath.Join(filepath.Dir(exe), "ollama-mlx")
 
-	// Spawn subprocess: ollama runner --image-engine --model <path> --port <port>
-	cmd := exec.Command(exe, "runner", "--image-engine", "--model", modelName, "--port", strconv.Itoa(port))
+	// Spawn subprocess: ollama-mlx runner --image-engine --model <path> --port <port>
+	cmd := exec.Command(mlxExe, "runner", "--image-engine", "--model", modelName, "--port", strconv.Itoa(port))
 	cmd.Env = os.Environ()
+
+	// On Linux, set LD_LIBRARY_PATH to include MLX library directories
+	if runtime.GOOS == "linux" {
+		// Build library paths: start with LibOllamaPath, then add any mlx_* subdirectories
+		libraryPaths := []string{ml.LibOllamaPath}
+		if mlxDirs, err := filepath.Glob(filepath.Join(ml.LibOllamaPath, "mlx_*")); err == nil {
+			libraryPaths = append(libraryPaths, mlxDirs...)
+		}
+
+		// Append existing LD_LIBRARY_PATH if set
+		if existingPath, ok := os.LookupEnv("LD_LIBRARY_PATH"); ok {
+			libraryPaths = append(libraryPaths, filepath.SplitList(existingPath)...)
+		}
+
+		pathEnvVal := strings.Join(libraryPaths, string(filepath.ListSeparator))
+
+		// Update or add LD_LIBRARY_PATH in cmd.Env
+		found := false
+		for i := range cmd.Env {
+			if strings.HasPrefix(cmd.Env[i], "LD_LIBRARY_PATH=") {
+				cmd.Env[i] = "LD_LIBRARY_PATH=" + pathEnvVal
+				found = true
+				break
+			}
+		}
+		if !found {
+			cmd.Env = append(cmd.Env, "LD_LIBRARY_PATH="+pathEnvVal)
+		}
+		slog.Debug("mlx subprocess library path", "LD_LIBRARY_PATH", pathEnvVal)
+	}
 
 	s := &Server{
 		cmd:       cmd,
@@ -113,7 +146,7 @@ func NewServer(modelName string) (*Server, error) {
 		}
 	}()
 
-	slog.Info("starting image runner subprocess", "model", modelName, "port", port)
+	slog.Info("starting ollama-mlx image runner subprocess", "exe", mlxExe, "model", modelName, "port", port)
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start image runner: %w", err)
 	}
