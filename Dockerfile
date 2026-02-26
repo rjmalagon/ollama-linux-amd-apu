@@ -27,6 +27,7 @@ ENV PATH=/${VULKANVERSION}/x86_64/bin:$PATH
 
 FROM --platform=linux/amd64 rocm/dev-almalinux-8:${ROCM7VERSION}-complete AS base_rocm7-amd64
 RUN dnf install -y yum-utils ccache gcc-toolset-11-gcc gcc-toolset-11-gcc-c++ gcc-toolset-11-binutils \
+    && yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
 ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
 ARG VULKANVERSION
 RUN wget https://sdk.lunarg.com/sdk/download/${VULKANVERSION}/linux/vulkansdk-linux-x86_64-${VULKANVERSION}.tar.xz -O /tmp/vulkansdk-linux-x86_64-${VULKANVERSION}.tar.xz \
