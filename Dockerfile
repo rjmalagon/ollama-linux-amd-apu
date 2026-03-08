@@ -2,33 +2,17 @@
 
 ARG FLAVOR=${TARGETARCH}
 
-ARG ROCM6VERSION=6.4.4
-ARG ROCM7VERSION=7.2
+ARG ROCMVERSION=7.2
 ARG JETPACK5VERSION=r35.4.1
 ARG JETPACK6VERSION=r36.4.0
 ARG CMAKEVERSION=3.31.2
 ARG NINJAVERSION=1.12.1
 ARG VULKANVERSION=1.4.321.1
 
-FROM --platform=linux/amd64 rocm/dev-almalinux-8:${ROCM6VERSION}-complete AS base-amd64
+FROM --platform=linux/amd64 rocm/dev-almalinux-8:${ROCMVERSION}-complete AS base-amd64
 RUN dnf install -y yum-utils ccache gcc-toolset-11-gcc gcc-toolset-11-gcc-c++ gcc-toolset-11-binutils \
     && yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
 ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
-
-FROM --platform=linux/amd64 rocm/dev-almalinux-8:${ROCM7VERSION}-complete AS base_rocm7-amd64
-RUN dnf install -y yum-utils ccache gcc-toolset-11-gcc gcc-toolset-11-gcc-c++ gcc-toolset-11-binutils \
-    && yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
-ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
-ARG VULKANVERSION
-RUN wget https://sdk.lunarg.com/sdk/download/${VULKANVERSION}/linux/vulkansdk-linux-x86_64-${VULKANVERSION}.tar.xz -O /tmp/vulkansdk-linux-x86_64-${VULKANVERSION}.tar.xz \
-    && tar xvf /tmp/vulkansdk-linux-x86_64-${VULKANVERSION}.tar.xz \
-    && dnf -y install ninja-build \
-    && ln -s /usr/bin/python3 /usr/bin/python \
-    && /${VULKANVERSION}/vulkansdk -j 8 vulkan-headers \
-    && /${VULKANVERSION}/vulkansdk -j 8 shaderc
-RUN cp -r /${VULKANVERSION}/x86_64/include/* /usr/local/include/ \
-    && cp -r /${VULKANVERSION}/x86_64/lib/* /usr/local/lib
-ENV PATH=/${VULKANVERSION}/x86_64/bin:$PATH
 
 FROM --platform=linux/arm64 almalinux:8 AS base-arm64
 # install epel-release for ccache
@@ -40,16 +24,6 @@ ENV CC=clang CXX=clang++
 FROM base-${TARGETARCH} AS base
 ARG CMAKEVERSION
 ARG NINJAVERSION
-RUN curl -fsSL https://github.com/Kitware/CMake/releases/download/v${CMAKEVERSION}/cmake-${CMAKEVERSION}-linux-$(uname -m).tar.gz | tar xz -C /usr/local --strip-components 1
-RUN dnf install -y unzip \
-    && curl -fsSL -o /tmp/ninja.zip https://github.com/ninja-build/ninja/releases/download/v${NINJAVERSION}/ninja-linux$([ "$(uname -m)" = "aarch64" ] && echo "-aarch64").zip \
-    && unzip /tmp/ninja.zip -d /usr/local/bin \
-    && rm /tmp/ninja.zip
-ENV CMAKE_GENERATOR=Ninja
-ENV LDFLAGS=-s
-
-FROM base_rocm7-${TARGETARCH} AS base_rocm7
-ARG CMAKEVERSION
 RUN curl -fsSL https://github.com/Kitware/CMake/releases/download/v${CMAKEVERSION}/cmake-${CMAKEVERSION}-linux-$(uname -m).tar.gz | tar xz -C /usr/local --strip-components 1
 RUN dnf install -y unzip \
     && curl -fsSL -o /tmp/ninja.zip https://github.com/ninja-build/ninja/releases/download/v${NINJAVERSION}/ninja-linux$([ "$(uname -m)" = "aarch64" ] && echo "-aarch64").zip \
@@ -111,16 +85,6 @@ RUN --mount=type=cache,target=/root/.ccache \
     cmake --preset 'ROCm 6' \
         && cmake --build --preset 'ROCm 6' -- -l $(nproc) \
         && cmake --install build --component HIP --strip
-RUN rm -f dist/lib/ollama/rocm/rocblas/library/*gfx90[06]*
-
-FROM base_rocm7 AS rocm-7
-ENV PATH=/opt/rocm/hcc/bin:/opt/rocm/hip/bin:/opt/rocm/bin:/opt/rocm/hcc/bin:$PATH
-COPY CMakeLists.txt CMakePresets.json .
-COPY ml/backend/ggml/ggml ml/backend/ggml/ggml
-RUN --mount=type=cache,target=/root/.ccache \
-    cmake --preset 'ROCm 7' \
-        && cmake --build --parallel ${PARALLEL} --preset 'ROCm 7' \
-        && cmake --install build --component HIP --strip --parallel ${PARALLEL}
 RUN rm -f dist/lib/ollama/rocm/rocblas/library/*gfx90[06]*
 
 FROM --platform=linux/arm64 nvcr.io/nvidia/l4t-jetpack:${JETPACK5VERSION} AS jetpack-5
@@ -231,14 +195,12 @@ COPY --from=jetpack-6 dist/lib/ollama/ /lib/ollama/
 
 FROM scratch AS rocm
 COPY --from=rocm-6 dist/lib/ollama /lib/ollama
-COPY --from=rocm-7 dist/lib/ollama /lib/ollama
-COPY --from=vulkan  dist/lib/ollama  /lib/ollama
 
 FROM ${FLAVOR} AS archive
 COPY --from=cpu dist/lib/ollama /lib/ollama
 COPY --from=build /bin/ollama /bin/ollama
 
-FROM ubuntu:25.10 AS default
+FROM ubuntu:25.10
 RUN apt-get update \
     && apt-get install -y ca-certificates rocminfo libvulkan1 libopenblas0 \
     && apt-get clean \
@@ -246,7 +208,7 @@ RUN apt-get update \
 COPY --from=archive /bin /usr/bin
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 COPY --from=archive /lib/ollama /usr/lib/ollama
-ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/ollama:/usr/lib/ollama/rocm
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV OLLAMA_HOST=0.0.0.0:11434
