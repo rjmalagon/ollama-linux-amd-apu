@@ -2,14 +2,12 @@
 This branch is a "not really a fork", some Dockerfile optimizations for AMD APUS.
 Needs >=6.10 Linux kernel.
 Intended for use in container environments such as Podman and Docker, but can be used to custom builds.
-This merge Vulkan, ROCm v6 and v7, in one universal image. Some autodetection is included, but it may not work for all APUs.
+This image suports ROCm v7 on x86-64, with vulkan an cpu fallback.
 
 ## Almost/maybe supported APUs
-To manually select runtimes:
-- Vega AMD APUs (AMD Ryzen 2000, 4000 and 5000 Series with Vega Graphics) use the Vulkan backend with the `OLLAMA_LLM_LIBRARY="vulkan"` and `OLLAMA_VULKAN=1`.
-- Early RDNA2 AMD APUs (AMD Ryzen 5000, 6000 and Series with RDNA2 Graphics) is recommended to use the ROCm v6 backend with the `OLLAMA_LLM_LIBRARY="rocm_v6"`, V7 ROCm runtime may crash with flash attention enabled.
-- RDNA2, RDNA3 and RDNA3.5 AMD APUs (AMD Ryzen 9000 Series with RDNA3 Graphics) is recommended to use the ROCm v7 backend with the `OLLAMA_LLM_LIBRARY="rocm_v7"`.
-- Since Ollama v0.13.3 flash attention is not working properly on RDNA2 AMD APUs on both ROCm v6 and v7 backends, `OLLAMA_FLASH_ATTENTION=false` can be used to disable it.
+- Vega AMD APUs (AMD Ryzen 2000, 4000 and 5000 Series with Vega Graphics) use the Vulkan backend with `OLLAMA_VULKAN=1`.
+- Early RDNA2 AMD APUs (AMD Ryzen 5000, 6000 and Series with RDNA2 Graphics), RDNA2, RDNA3 and RDNA3.5 AMD APUs (AMD Ryzen 9000 Series with RDNA3 Graphics)" for the default ROCm v7 runtime.
+- Since Ollama v0.13.3 flash attention is not working properly on RDNA2 AMD APUs on ROCm v7 backends, `OLLAMA_FLASH_ATTENTION=false` may be used to disable it.
 
 ## How to build on Docker:
 Just like:
@@ -37,7 +35,7 @@ You can test my container image on ghcr.io/rjmalagon/ollama-linux-amd-apu:optm-l
 Example on how to run this image on Podman with an Ryzen 7000 Series APU, with flash attention and quantized KV cache, listen on localhost.
 
 ```shell
-podman run --name ollama  -v /local/data/path/:/root/.ollama:Z -e OLLAMA_FLASH_ATTENTION=true -e OLLAMA_LLM_LIBRARY="rocm_v6" -e HSA_OVERRIDE_GFX_VERSION="10.3.0" -e OLLAMA_KV_CACHE_TYPE="q8_0" --device /dev/kfd --device /dev/dri -e OLLAMA_DEBUG=0 -p 127.0.0.1:11434:11434 ghcr.io/rjmalagon/ollama-linux-amd-apu:optm-latest serve
+podman run --name ollama  -v /local/data/path/:/root/.ollama:Z -e OLLAMA_FLASH_ATTENTION=true -e HSA_OVERRIDE_GFX_VERSION="10.3.0" -e OLLAMA_KV_CACHE_TYPE="q8_0" --device /dev/kfd --device /dev/dri -e OLLAMA_DEBUG=0 -p 127.0.0.1:11434:11434 ghcr.io/rjmalagon/ollama-linux-amd-apu:optm-latest serve
 ```
 ### Check amount of GTT memory
  You can check the amount of shared memory (GTT memory) by using this command
