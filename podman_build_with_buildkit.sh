@@ -1,0 +1,3 @@
+podman run -it --rm --privileged -v ./:/tmp/work:z --entrypoint
+ buildctl-daemonless.sh dokcer.io/moby/buildkit:master build --frontend dockerfile.v0 --local context=/tmp/work --local dockerfile=/tmp/work --opt build-arg:FLAVOR=rocm --opt build-arg:VERSION=0.18.0.2 --opt label:org.opencontainers.image.source="https://github.com/rjmalagon/ollama-linux-amd-apu"
+ --opt label:org.opencontainers.image.licenses="MIT" --opt platform=x86_64 --opt label:org.opencontainers.image.description="AMD APU enabled Ollama" --output type=oci,"name=ghcr.io/rjmalagon/ollama-linux-amd-apu:optm-latest",dest=/tmp/work/ollama-rocm+vulkan.tar
