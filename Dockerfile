@@ -206,6 +206,7 @@ COPY --from=jetpack-6 dist/lib/ollama/ /lib/ollama/
 
 FROM scratch AS rocm
 COPY --from=rocm-7 dist/lib/ollama /lib/ollama
+COPY --from=vulkan  dist/lib/ollama  /lib/ollama/
 
 FROM ${FLAVOR} AS archive
 COPY --from=cpu dist/lib/ollama /lib/ollama
