@@ -22,23 +22,15 @@ func (c *RecurrentCache) setStateRaw(old, v *mlx.Array) *mlx.Array {
 	if v == nil || !v.Valid() {
 		return old
 	}
-	if old == v {
-		return old
-	}
 
 	mlx.Pin(v)
-	if old != nil && old != v {
-		mlx.Unpin(old)
-	}
+	mlx.Unpin(old)
 
 	return v
 }
 
 func (c *RecurrentCache) setStateDetached(old, v *mlx.Array, ensureContiguous bool) *mlx.Array {
 	if v == nil || !v.Valid() {
-		return old
-	}
-	if old == v {
 		return old
 	}
 
@@ -49,9 +41,7 @@ func (c *RecurrentCache) setStateDetached(old, v *mlx.Array, ensureContiguous bo
 	detached := root.Clone()
 
 	mlx.Pin(detached)
-	if old != nil && old != detached {
-		mlx.Unpin(old)
-	}
+	mlx.Unpin(old)
 
 	return detached
 }
@@ -150,10 +140,10 @@ func (c *RecurrentCache) Restore(snapshot Snapshot, target int) bool {
 
 	snap := snapshot.(*recurrentSnapshot)
 
-	// Recurrent state encodes all tokens up to snap.offset. Restoring
-	// to a target before that would leave stale state from tokens
-	// [target, snap.offset) baked in. Only allow restoring forward.
-	if target < snap.offset {
+	// Recurrent snapshots encode cumulative state up to exactly
+	// snap.offset. Target must match — rewinding would leave stale
+	// state, and advancing isn't possible without feeding tokens.
+	if target != snap.offset {
 		return false
 	}
 
