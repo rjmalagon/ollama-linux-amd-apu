@@ -2,12 +2,12 @@
 
 ARG FLAVOR=${TARGETARCH}
 
-ARG ROCMVERSION=7.2
+ARG ROCMVERSION=7.2.1
 ARG JETPACK5VERSION=r35.4.1
 ARG JETPACK6VERSION=r36.4.0
 ARG CMAKEVERSION=3.31.2
 ARG NINJAVERSION=1.12.1
-ARG VULKANVERSION=1.4.321.1
+ARG VULKANVERSION=1.4.341.1
 
 # Default empty stages for local MLX source overrides.
 # Override with: docker build --build-context local-mlx=../mlx --build-context local-mlx-c=../mlx-c
@@ -212,9 +212,9 @@ FROM ${FLAVOR} AS archive
 COPY --from=cpu dist/lib/ollama /lib/ollama
 COPY --from=build /bin/ollama /bin/ollama
 
-FROM ubuntu:25.10
+FROM ubuntu:26.04
 RUN apt-get update \
-    && apt-get install -y ca-certificates libvulkan1 libopenblas0 rocminfo \
+    && apt-get install -y ca-certificates libvulkan1 vulkan-tools libopenblas0 rocminfo nvtop \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=archive /bin /usr/bin
