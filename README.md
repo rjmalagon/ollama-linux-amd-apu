@@ -48,14 +48,16 @@ podman run --name ollama  -v /local/data/path/:/root/.ollama:Z -e OLLAMA_FLASH_A
 The default value is half of system memory.
 ### Modify the amount of GTT memory
 
- If you want to modify the amount of GTT memory. You can edit the `/etc/modprobe.d/ttm.conf` file and add the following content:
+ By default, AMDGPU linux driver assigns 50% of main memory for the shared memory pool on APUs, you can increase this amount with the `gttsize` parameter of the AMDGPU kernel driver.
+ 
+ At boot with the `amdgpu.gttsize` kernel argument, example `amdgpu.gttsize=62000` for a ~62GB share memory pool. Or as a modprobe parameter config at load file, example `options admgpu gttsize=80000` in `/etc/modprobe.d/amdgpu.conf` for a ~80GB share memory pool.
 
- ```
- # nb of pages 4k, for 48Go
- options ttm pages_limit=12582912
- options ttm page_pool_size=12582912
- ```
+### Modify the gpu lockup timeout timer.
 
+ On larger models in slower AMD APUs, you can hit the AMDGPU linux dircer lockup timeout auto reset that kills Ollama on some tasks. This defaults to 10s. You can increase this amount with the `lockup_timeout` parameter of the AMDGPU kernel driver.
+ 
+ At boot with the `amdgpu.lockup_timeout` kernel argument, example `amdgpu.gttsize=60000` for a minute timeout. Or as a modprobe parameter config at load file, example `options admgpu lockup_timeou=120000` in `/etc/modprobe.d/amdgpu.conf` for a two minute timeout.
+ 
  ## Mentions
  Kudos to @phueper for the Dockerfile expanded ROCM dependencies and to @winstonma for the valuable GTT memory adjustment info.
 
