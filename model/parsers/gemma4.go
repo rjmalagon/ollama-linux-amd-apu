@@ -26,6 +26,7 @@ const (
 	gemma4ThinkingCloseTag = "<channel|>"
 	gemma4ToolCallOpenTag  = "<|tool_call>"
 	gemma4ToolCallCloseTag = "<tool_call|>"
+	gemma4ToolResponseTag  = "<|tool_response>"
 	gemma4StringDelimiter  = `<|"|>`
 )
 
@@ -38,6 +39,7 @@ type Gemma4Parser struct {
 	state                 Gemma4ParserState
 	buffer                strings.Builder
 	tools                 []api.Tool
+	callIndex             int
 	hasThinkingSupport    bool
 	thinkingEnabled       bool // true when both model supports and user requested thinking
 	needsChannelNameStrip bool // true when we just entered thinking and need to strip "thought\n"
@@ -53,6 +55,7 @@ func (p *Gemma4Parser) HasThinkingSupport() bool {
 
 func (p *Gemma4Parser) Init(tools []api.Tool, lastMessage *api.Message, thinkValue *api.ThinkValue) []api.Tool {
 	p.tools = tools
+	p.callIndex = 0
 
 	prefill := lastMessage != nil && lastMessage.Role == "assistant"
 
@@ -114,6 +117,11 @@ func (p *Gemma4Parser) Add(s string, done bool) (content string, thinking string
 		case gemma4EventContent:
 			contentSb.WriteString(event.content)
 		}
+	}
+
+	for i := range toolCalls {
+		toolCalls[i].Function.Index = p.callIndex
+		p.callIndex++
 	}
 
 	return contentSb.String(), thinkingSb.String(), toolCalls, nil
@@ -319,26 +327,39 @@ func (p *Gemma4Parser) eat(done bool) ([]gemma4Event, bool) {
 
 	case Gemma4IgnoringPostToolCallNoise:
 		// We've observed Gemma 4 occasionally emitting extra <tool_call|> tags
-		// after a valid tool call. We suppress leading close tags in this immediate
-		// post-tool-call state so the extra close tags do not leak into assistant
-		// content.  The tradeoff is that if the model intentionally begins its next
-		// content span with the literal string "<tool_call|>", we will erroneously
-		// treat it as noise and drop it.
+		// after a valid tool call. We suppress those leading control tags in this
+		// immediate post-tool-call state so they do not leak into assistant
+		// content. The tradeoff is that if the model intentionally begins its next
+		// content span with one of those literal strings, we will erroneously
+		// treat it as noise and drop it. We also suppress a leading
+		// <|tool_response> marker here because the updated upstream parser/template
+		// uses it as a post-tool-call boundary.
 		bufStr = strings.TrimLeftFunc(bufStr, unicode.IsSpace)
 		p.buffer.Reset()
 		p.buffer.WriteString(bufStr)
 
-		for strings.HasPrefix(bufStr, gemma4ToolCallCloseTag) {
-			bufStr = strings.TrimLeftFunc(bufStr[len(gemma4ToolCallCloseTag):], unicode.IsSpace)
+		for {
+			switch {
+			case strings.HasPrefix(bufStr, gemma4ToolCallCloseTag):
+				bufStr = strings.TrimLeftFunc(bufStr[len(gemma4ToolCallCloseTag):], unicode.IsSpace)
+			case strings.HasPrefix(bufStr, gemma4ToolResponseTag):
+				bufStr = strings.TrimLeftFunc(bufStr[len(gemma4ToolResponseTag):], unicode.IsSpace)
+			default:
+				p.buffer.Reset()
+				p.buffer.WriteString(bufStr)
+				goto strippedPostToolCallNoise
+			}
+
 			p.buffer.Reset()
 			p.buffer.WriteString(bufStr)
 		}
 
+	strippedPostToolCallNoise:
 		if bufStr == "" {
 			return events, false
 		}
 
-		if strings.HasPrefix(gemma4ToolCallCloseTag, bufStr) {
+		if strings.HasPrefix(gemma4ToolCallCloseTag, bufStr) || strings.HasPrefix(gemma4ToolResponseTag, bufStr) {
 			if done {
 				p.buffer.Reset()
 				p.state = Gemma4CollectingContent
