@@ -66,9 +66,9 @@ The default value is half of system memory.
 
  On larger models in slower AMD APUs, you can hit the AMDGPU linux dircer lockup timeout auto reset that kills Ollama on some tasks. This defaults to 10s. You can increase this amount with the `lockup_timeout` parameter of the AMDGPU kernel driver.
  
- At boot with the `amdgpu.lockup_timeout` kernel argument, example `amdgpu.gttsize=60000` for a minute timeout. 
+ At boot with the `amdgpu.lockup_timeout` kernel argument, example `amdgpu.lockup_timeout=60000` for a minute timeout. 
  
- Or as a modprobe parameter config at load file, example `options admgpu lockup_timeou=120000` in `/etc/modprobe.d/amdgpu.conf` for a two minute timeout.
+ Or as a modprobe parameter config at load file, example `options admgpu lockup_timeout=120000` in `/etc/modprobe.d/amdgpu.conf` for a two minute timeout.
  
  ## Mentions
  Kudos to @phueper for the Dockerfile expanded ROCM dependencies and to @winstonma for the valuable GTT memory adjustment info.
