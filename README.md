@@ -1,3 +1,7 @@
+Archiving this. Ollama now is now a MLX thingy (no AMD/Linux love there) plus a literal llama.cpp llama-server wrapper for the rest (no more GGML runtime, no more llama.cpp runtime).
+Upstream Llama.cpp got better AMD APU support and there are nicer wrappers around it.
+Thanks for all to the upstream Ollama and llama.cpp developers for this wonderful tools.
+
 # Notes:
 This branch is a "not really a fork", some Dockerfile optimizations for AMD APUS.
 Needs >=6.10 Linux kernel.
